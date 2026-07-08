@@ -9,9 +9,15 @@
     充电桩连接: ws://localhost:9000/{charge_box_id}
 """
 
+import sys
+
+# Windows 控制台 UTF-8 编码
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 import asyncio
 import logging
-import sys
 
 import uvicorn
 
@@ -53,7 +59,8 @@ async def main():
         host=settings.web_host,
         port=settings.web_port,
         log_level="info",
-        timeout_keep_alive=5,  # 5 秒后关闭空闲连接
+        timeout_keep_alive=5,
+        use_colors=False,
     )
     server = uvicorn.Server(config)
     await server.serve()
@@ -65,3 +72,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
         sys.exit(0)
+    except OSError as e:
+        if "address already in use" in str(e).lower() or "仅允许" in str(e):
+            print(f"\n端口被占用，请检查 {settings.ws_port} 或 {settings.web_port} 是否已被其他程序使用\n")
+        else:
+            raise
+        sys.exit(1)
