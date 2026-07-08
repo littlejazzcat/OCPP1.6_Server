@@ -1,0 +1,910 @@
+{% extends "base.html" %}
+{% block content %}
+<style>.container { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }</style>
+
+<!-- ========== 顶栏：连接状态 ========== -->
+<div class="conn-bar">
+  <div class="conn-info">
+    <span class="conn-dot {% if cp.online %}online{% else %}offline{% endif %}" id="conn-dot"></span>
+    <strong>{{ cp.charge_box_id }}</strong>
+    <span class="conn-status {% if cp.online %}online{% else %}offline{% endif %}" id="conn-status">{{ 'Connected' if cp.online else 'Disconnected' }}</span>
+    <span class="conn-meta">OCPP 1.6</span>
+  </div>
+  <div class="conn-device">
+    <span>{{ cp.vendor or 'Unknown' }} {{ cp.model or '' }}</span>
+    <span class="conn-fw">{{ cp.firmware_version or '-' }}</span>
+  </div>
+  {% if cp.serial_number %}
+  <div class="conn-serial">SN: {{ cp.serial_number }}</div>
+  {% endif %}
+  <div class="conn-actions">
+    <a href="/charge-points" class="btn btn-sm">← 返回列表</a>
+  </div>
+</div>
+
+<!-- ========== 主体：左侧标签面板 + 右侧命令栏 ========== -->
+<div class="detail-layout">
+  
+  <!-- 左侧主面板 -->
+  <div class="main-panel">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="logs">📡 Logs</button>
+      <button class="tab-btn" data-tab="handlers">⚙ Handlers</button>
+      <button class="tab-btn" data-tab="config">🔧 Configuration</button>
+      <button class="tab-btn" data-tab="testing">🧪 Testing</button>
+      <span class="tab-extra" id="tab-extra"></span>
+    </div>
+
+    <!-- Logs 标签页 -->
+    <div class="tab-content active" id="tab-logs">
+      <div class="msg-toolbar">
+        <span id="page-info" class="page-info-text" style="min-width:150px;">Showing 1-40 of 0</span>
+        <span style="flex:1;"></span>
+        <button class="btn btn-sm" id="btn-first" onclick="goPage('first')">«</button>
+        <button class="btn btn-sm" id="btn-prev" onclick="goPage('prev')">‹</button>
+        <span id="page-num" class="page-info-text" style="min-width:50px;">0/1</span>
+        <button class="btn btn-sm" id="btn-next" onclick="goPage('next')">›</button>
+        <button class="btn btn-sm" id="btn-last" onclick="goPage('last')">»</button>
+        <span style="flex:1;"></span>
+        <select id="page-size-select" onchange="changePageSize()" style="padding:3px 6px;font-size:12px;border:1px solid #ddd;border-radius:4px;">
+          <option value="10">10 / p</option>
+          <option value="25">25 / p</option>
+          <option value="40" selected>40 / p</option>
+          <option value="50">50 / p</option>
+          <option value="100">100 / p</option>
+        </select>
+        <button class="btn btn-sm" id="pause-btn" onclick="togglePause()">⏸ 暂停</button>
+        <button class="btn btn-sm" id="theme-btn" onclick="toggleLogTheme()">🌙 暗色</button>
+        <button class="btn btn-sm" onclick="exportLog()" title="导出为文本">⬇ 导出</button>
+        <button class="btn btn-sm btn-danger" onclick="clearLog()" title="清除当前充电桩报文">🗑 清除</button>
+      </div>
+      <div id="message-log" class="log-container light">
+        <div class="log-placeholder">等待报文...</div>
+      </div>
+    </div>
+
+    <!-- Handlers 标签页 -->
+    <div class="tab-content" id="tab-handlers">
+      <div class="handler-toolbar">
+        <span id="handler-count">14 handlers · 7 configured</span>
+        <span style="flex:1;"></span>
+        <button class="btn btn-sm filter-btn active" data-filter="all">All</button>
+        <button class="btn btn-sm filter-btn" data-filter="configured">Configurable only</button>
+      </div>
+      <div class="handler-list" id="handler-list">
+        <!-- JS 动态生成 -->
+      </div>
+    </div>
+
+    <!-- Configuration 标签页 -->
+    <div class="tab-content" id="tab-config">
+      <div class="config-section">
+        <h3>WebSocket Keep-alive</h3>
+        <div class="config-row">
+          <label>Interval (seconds)</label>
+          <input type="number" id="keepalive-interval" value="120" style="width:100px;">
+          <button class="btn btn-sm btn-success" onclick="saveKeepalive()">Save</button>
+        </div>
+      </div>
+      <div class="config-section">
+        <h3>基本信息</h3>
+        <table>
+          <tr><td style="width:140px;">ChargeBox ID</td><td><strong>{{ cp.charge_box_id }}</strong></td></tr>
+          <tr><td>厂商</td><td>{{ cp.vendor or '-' }}</td></tr>
+          <tr><td>型号</td><td>{{ cp.model or '-' }}</td></tr>
+          <tr><td>序列号</td><td>{{ cp.serial_number or '-' }}</td></tr>
+          <tr><td>固件版本</td><td>{{ cp.firmware_version or '-' }}</td></tr>
+          <tr><td>ICCID</td><td>{{ cp.iccid or '-' }}</td></tr>
+          <tr><td>IMSI</td><td>{{ cp.imsi or '-' }}</td></tr>
+          <tr><td>电表类型</td><td>{{ cp.meter_type or '-' }}</td></tr>
+          <tr><td>最后心跳</td><td>{{ cp.last_heartbeat.strftime('%Y-%m-%d %H:%M:%S') if cp.last_heartbeat else '-' }}</td></tr>
+        </table>
+      </div>
+      <div class="config-section">
+        <h3>连接器状态</h3>
+        {% if connectors %}
+        <table>
+          <thead><tr><th>连接器</th><th>状态</th><th>错误码</th></tr></thead>
+          <tbody>
+            {% for c in connectors %}
+            <tr>
+              <td>#{{ c.connector_id }}</td>
+              <td><span class="connector-status {{ c.status.lower() }}">{{ c.status }}</span></td>
+              <td>{{ c.error_code if c.error_code != 'NoError' else '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="empty">暂无连接器状态</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Testing 标签页 -->
+    <div class="tab-content" id="tab-testing">
+      <p class="empty" style="padding:40px;">🧪 测试工具面板（待扩展）</p>
+    </div>
+  </div>
+
+  <!-- 右侧命令侧边栏 -->
+  <div class="cmd-sidebar">
+    <div class="cmd-header">Commands</div>
+    <input type="text" id="cmd-search" class="cmd-search" placeholder="Search commands..." oninput="filterCommands()">
+    
+    <div class="cmd-group" data-group="transaction">
+      <div class="cmd-group-title">Transaction Control</div>
+      <button class="cmd-btn" onclick="sendCmd('remote-start')">▶ Remote Start Transaction</button>
+      <button class="cmd-btn btn-danger" onclick="sendCmd('remote-stop')">⏹ Remote Stop Transaction</button>
+    </div>
+
+    <div class="cmd-group" data-group="reset">
+      <div class="cmd-group-title">Device Control</div>
+      <button class="cmd-btn" onclick="sendCmd('reset', {reset_type:'Soft'})">🔄 Reset (Soft)</button>
+      <button class="cmd-btn btn-danger" onclick="sendCmd('reset', {reset_type:'Hard'})">⚠ Reset (Hard)</button>
+      <button class="cmd-btn" onclick="sendCmd('unlock')">🔓 Unlock Connector</button>
+    </div>
+
+    <div class="cmd-group" data-group="config">
+      <div class="cmd-group-title">Configuration</div>
+      <button class="cmd-btn" onclick="sendCmd('change-config')">⚙ Change Configuration</button>
+      <button class="cmd-btn" onclick="sendCmd('get-config')">📋 Get Configuration</button>
+      <button class="cmd-btn" onclick="sendCmd('clear-cache')">🗑 Clear Cache</button>
+    </div>
+
+    <div class="cmd-group" data-group="firmware">
+      <div class="cmd-group-title">Firmware Management</div>
+      <button class="cmd-btn" onclick="sendCmd('update-firmware')">📦 Update Firmware</button>
+      <button class="cmd-btn" onclick="sendCmd('get-diagnostics')">📊 Get Diagnostics</button>
+    </div>
+
+    <div class="cmd-group" data-group="auth">
+      <div class="cmd-group-title">Local Auth List Management</div>
+      <button class="cmd-btn" onclick="sendCmd('get-local-list')">📋 Get Local List Version</button>
+      <button class="cmd-btn" onclick="sendCmd('send-local-list')">📤 Send Local List</button>
+    </div>
+
+    <div class="cmd-group" data-group="smart">
+      <div class="cmd-group-title">Smart Charging</div>
+      <button class="cmd-btn" onclick="sendCmd('set-charging-profile')">⚡ Set Charging Profile</button>
+      <button class="cmd-btn" onclick="sendCmd('clear-charging-profile')">🧹 Clear Charging Profile</button>
+      <button class="cmd-btn" onclick="sendCmd('get-composite-schedule')">📅 Get Composite Schedule</button>
+    </div>
+
+    <div class="cmd-group" data-group="trigger">
+      <div class="cmd-group-title">Remote Trigger</div>
+      <button class="cmd-btn" onclick="sendCmd('trigger')">📡 Trigger Message</button>
+    </div>
+
+    <div class="cmd-group" data-group="reservation">
+      <div class="cmd-group-title">Reservation</div>
+      <button class="cmd-btn" onclick="sendCmd('reserve-now')">📌 Reserve Now</button>
+      <button class="cmd-btn btn-danger" onclick="sendCmd('cancel-reservation')">✖ Cancel Reservation</button>
+    </div>
+
+    <!-- Handler 配置弹窗 -->
+    <div id="handler-modal" class="cmd-modal" style="display:none;">
+      <div class="cmd-modal-content" style="min-width:420px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div style="font-size:12px;color:#999;">Configure handler</div>
+          <button onclick="closeHandlerModal()" style="border:none;background:none;cursor:pointer;font-size:18px;color:#999;">&times;</button>
+        </div>
+        <div class="cmd-modal-title" id="hmodal-title" style="font-size:16px;"></div>
+        <div id="hmodal-desc" style="font-size:13px;color:#666;margin:6px 0 16px;"></div>
+        
+        <div id="hmodal-status-section" style="margin-bottom:12px;">
+          <label style="font-size:13px;color:#555;" id="hmodal-status-label">Authorization status</label>
+          <select id="hmodal-status" style="width:100%;padding:8px;margin-top:4px;border:1px solid #ddd;border-radius:4px;font-size:13px;"></select>
+        </div>
+        
+        <div id="hmodal-no-config" style="display:none;margin-bottom:12px;font-size:13px;color:#999;font-style:italic;">
+          This handler has no configurable response fields. Only response behavior (Normal/Drop/Delay) can be modified.
+        </div>
+        
+        <div id="hmodal-cert-section" style="margin-bottom:16px;">
+          <label style="font-size:13px;color:#555;">Certificate status (optional)</label>
+          <select id="hmodal-cert" style="width:100%;padding:8px;margin-top:4px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+            <option value="None">None</option>
+            <option value="Accepted">Accepted</option>
+            <option value="SignatureError">SignatureError</option>
+            <option value="CertificateExpired">CertificateExpired</option>
+            <option value="CertificateRevoked">CertificateRevoked</option>
+            <option value="NoCertificateAvailable">NoCertificateAvailable</option>
+            <option value="CertChainError">CertChainError</option>
+            <option value="ContractCancelled">ContractCancelled</option>
+          </select>
+        </div>
+        
+        <div id="hmodal-interval-section" style="display:none;margin-bottom:16px;">
+          <label style="font-size:13px;color:#555;">Heartbeat Interval (seconds)</label>
+          <input id="hmodal-interval" type="number" value="86400" min="10" max="86400" style="width:100%;padding:8px;margin-top:4px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+        </div>
+        
+        <div style="margin-bottom:16px;">
+          <div style="font-size:13px;color:#555;margin-bottom:6px;">Response behavior</div>
+          <div style="font-size:12px;color:#999;margin-bottom:8px;" id="hmodal-behav-hint">Reply as usual</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="behav-btn" data-val="Normal">Normal</button>
+            <button class="behav-btn" data-val="Drop">Drop</button>
+            <button class="behav-btn" data-val="Delay">Delay</button>
+          </div>
+          <div id="hmodal-delay-row" style="display:none;margin-top:8px;">
+            <label style="font-size:13px;color:#555;">Delay (seconds)</label>
+            <input id="hmodal-delay" type="number" value="5" min="0" max="120" style="width:100%;padding:8px;margin-top:4px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+          </div>
+        </div>
+        
+        <div class="cmd-modal-actions">
+          <button class="btn btn-sm" onclick="closeHandlerModal()">Cancel</button>
+          <button class="btn btn-sm btn-success" onclick="applyHandlerConfig()">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="cmd-modal" class="cmd-modal" style="display:none;">
+      <div class="cmd-modal-content">
+        <div class="cmd-modal-title" id="cmd-modal-title"></div>
+        <div id="cmd-modal-body"></div>
+        <div class="cmd-modal-actions">
+          <button class="btn btn-sm" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-sm btn-success" id="cmd-modal-send">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== 标签切换 ==========
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ========== 报文分页 ==========
+const CP_ID = "{{ cp.charge_box_id }}";
+let PAGE_SIZE = 40;
+let allMessages = [];
+let currentOffset = 0;
+let paused = false;
+let autoScroll = true;
+
+const msgLog = document.getElementById("message-log");
+const pageInfo = document.getElementById("page-info");
+const pageNum = document.getElementById("page-num");
+
+fetchMessages(0, 1000);
+
+const msgEvt = new EventSource("/sse/messages");
+msgEvt.addEventListener("ocpp_messages", (e) => {
+  const msgs = JSON.parse(e.data);
+  // 过滤：只显示当前充电桩的报文
+  const filtered = msgs.filter(m => m.charge_box_id === CP_ID);
+  filtered.forEach(m => allMessages.push(m));
+  if (filtered.length > 0) {
+    if (!paused && autoScroll) { currentOffset = 0; renderPage(); }
+    else if (!paused) { updatePager(); }
+  }
+});
+
+function fetchMessages(offset, limit) {
+  limit = limit || PAGE_SIZE;
+  fetch(`/api/messages?offset=${offset}&limit=${limit}`)
+    .then(r => r.json())
+    .then(data => {
+      const localMap = {};
+      allMessages.forEach(m => { localMap[m.seq] = m; });
+      data.messages.forEach(m => { localMap[m.seq] = m; });
+      allMessages = Object.values(localMap).sort((a, b) => a.seq - b.seq);
+      // 过滤当前 CP
+      allMessages = allMessages.filter(m => m.charge_box_id === CP_ID);
+      currentOffset = offset;
+      autoScroll = (offset === 0);
+      renderPage();
+    });
+}
+
+function renderPage() {
+  const total = allMessages.length;
+  const start = Math.max(0, total - currentOffset - PAGE_SIZE);
+  const end = total - currentOffset;
+  const page = allMessages.slice(start, end)
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return b.timestamp.localeCompare(a.timestamp);
+      return (a.msg_type || 0) - (b.msg_type || 0);
+    });
+  msgLog.innerHTML = "";
+  if (page.length === 0) {
+    msgLog.innerHTML = '<div class="log-placeholder">暂无报文</div>';
+  } else {
+    page.forEach(m => {
+      const dir = m.direction === "IN" ? "◀" : "▶";
+      const colorClass = m.direction === "IN" ? "log-in" : "log-out";
+      const payloadStr = typeof m.payload === 'object'
+        ? JSON.stringify(m.payload)
+        : String(m.payload || '');
+      const div = document.createElement("div");
+      div.className = `log-line ${colorClass}`;
+      div.innerHTML = `<span class="log-ts">${m.timestamp}</span> <span class="log-cp">[${m.charge_box_id}]</span> <strong>${dir}</strong> ${m.action} <span class="log-payload">${payloadStr}</span>`;
+      msgLog.appendChild(div);
+    });
+  }
+  updatePager();
+}
+
+function updatePager() {
+  const total = allMessages.length;
+  const ps = PAGE_SIZE;
+  const p = total === 0 ? 1 : Math.floor(currentOffset / ps) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / ps));
+  const startIdx = total === 0 ? 0 : Math.max(1, total - currentOffset - ps + 1);
+  const endIdx = Math.max(0, total - currentOffset);
+  pageInfo.textContent = `Showing ${startIdx}-${endIdx} of ${total}`;
+  pageNum.textContent = `${p}/${totalPages}`;
+  document.getElementById("btn-prev").disabled = currentOffset === 0;
+  document.getElementById("btn-first").disabled = currentOffset === 0;
+  document.getElementById("btn-next").disabled = currentOffset + ps >= total;
+  document.getElementById("btn-last").disabled = currentOffset >= Math.max(0, total - ps);
+}
+
+function goPage(dir) {
+  const total = allMessages.length;
+  const ps = PAGE_SIZE;
+  if (dir === 'first') { currentOffset = 0; autoScroll = true; }
+  else if (dir === 'last') { currentOffset = Math.max(0, total - ps); autoScroll = false; }
+  else if (dir === 'prev') { currentOffset = Math.max(0, currentOffset - ps); autoScroll = (currentOffset <= ps); }
+  else if (dir === 'next') { currentOffset = Math.min(total, currentOffset + ps); autoScroll = false; }
+  renderPage();
+}
+
+function changePageSize() {
+  PAGE_SIZE = parseInt(document.getElementById("page-size-select").value);
+  currentOffset = 0;
+  autoScroll = true;
+  renderPage();
+}
+
+function togglePause() {
+  paused = !paused;
+  const btn = document.getElementById("pause-btn");
+  btn.textContent = paused ? "▶ 继续" : "⏸ 暂停";
+  btn.style.background = paused ? "#ff9800" : "";
+  btn.style.color = paused ? "#fff" : "";
+}
+
+function toggleLogTheme() {
+  const log = document.getElementById("message-log");
+  const btn = document.getElementById("theme-btn");
+  if (log.classList.contains("dark")) {
+    log.classList.remove("dark");
+    log.classList.add("light");
+    btn.innerHTML = "☀ 亮色";
+  } else {
+    log.classList.remove("light");
+    log.classList.add("dark");
+    btn.innerHTML = "🌙 暗色";
+  }
+}
+
+function exportLog() {
+  const lines = allMessages.map(m => {
+    const dir = m.direction === "IN" ? "◀" : "▶";
+    const payloadStr = typeof m.payload === 'object' ? JSON.stringify(m.payload) : String(m.payload || '');
+    return `${m.timestamp} [${m.charge_box_id}] ${dir} ${m.action} ${payloadStr}`;
+  });
+  const blob = new Blob([lines.join('\n')], {type: 'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ocpp_log_${CP_ID}_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+}
+
+async function clearLog() {
+  if (!confirm('确认清除所有报文记录？')) return;
+  await fetch('/api/messages', {method: 'DELETE'});
+  allMessages = [];
+  currentOffset = 0;
+  renderPage();
+}
+
+// ========== Handlers 配置 ==========
+const handlers = [
+  { name: "AuthorizeRequest", action: "authorize",
+    desc: "Controls how the toolkit responds to incoming Authorize calls. Authorization status (idTagInfo) and optional certificate status (for Plug & Charge).",
+    status: "Accepted", certStatus: "None", behavior: "Normal", delay: 0, configurable: true },
+  { name: "BootNotificationRequest", action: "boot",
+    desc: "Responds to charge point boot notifications. Configure registration status and heartbeat interval.",
+    status: "Accepted", interval: 86400, certStatus: "None", behavior: "Normal", delay: 0, configurable: true, extra: "interval: 86400" },
+  { name: "DataTransferRequest", action: "data_transfer",
+    desc: "Handles vendor-specific data transfer requests. Set to Reject to block unknown vendor data.",
+    status: "Accepted", certStatus: "None", behavior: "Normal", delay: 0, configurable: true },
+  { name: "DiagnosticsStatusNotificationRequest", action: "diagnostics",
+    desc: "Acknowledges diagnostics upload status notifications from the charge point. Response has no configurable fields.",
+    status: "ack", certStatus: "None", behavior: "Normal", delay: 0, configurable: false },
+  { name: "FirmwareStatusNotificationRequest", action: "firmware",
+    desc: "Acknowledges firmware update progress notifications from the charge point. Response has no configurable fields.",
+    status: "ack", certStatus: "None", behavior: "Normal", delay: 0, configurable: false },
+  { name: "HeartbeatRequest", action: "heartbeat",
+    desc: "Auto-responds to heartbeat messages with current server time. Response has no configurable fields.",
+    status: "ack", certStatus: "None", behavior: "Normal", delay: 0, configurable: false },
+  { name: "LogStatusNotificationRequest", action: "log_status",
+    desc: "Acknowledges log upload status notifications from the charge point. Response has no configurable fields.",
+    status: "ack", certStatus: "None", behavior: "Normal", delay: 0, configurable: false },
+  { name: "MeterValuesRequest", action: "meter",
+    desc: "Accepts and stores meter value samples during transactions. Response has no configurable fields.",
+    status: "ack", certStatus: "None", behavior: "Normal", delay: 0, configurable: false },
+  { name: "StartTransactionRequest", action: "start_tx",
+    desc: "Accepts new transaction requests and assigns a transaction ID. Configure authorization status.",
+    status: "Accepted", certStatus: "None", behavior: "Normal", delay: 0, configurable: true },
+  { name: "StatusNotificationRequest", action: "status",
+    desc: "Records connector status changes (Available, Charging, Faulted, etc.). Response has no configurable fields.",
+    status: "ack", certStatus: "None", behavior: "Normal", delay: 0, configurable: false },
+  { name: "StopTransactionRequest", action: "stop_tx",
+    desc: "Finalizes transactions with meter stop values and stop reason. Configure optional authorization status.",
+    status: "Accepted", certStatus: "None", behavior: "Normal", delay: 0, configurable: true },
+];
+
+let currentFilter = 'all';
+let editingHandler = null;
+
+function renderHandlers() {
+  const list = document.getElementById("handler-list");
+  const filtered = currentFilter === 'configured'
+    ? handlers.filter(h => h.configurable)
+    : handlers;
+
+  list.innerHTML = filtered.map(h => {
+    const statusClass = h.status === 'Accepted' ? 'status-accept' :
+                        ['Rejected','Blocked','Expired','Invalid','ConcurrentTx',
+                         'NotAllowedTypeEVSE','NotAtThisLocation','NotAtThisTime','Unknown'].includes(h.status) ? 'status-reject' :
+                        h.status === 'Pending' ? 'status-pending' :
+                        h.status === 'ack' ? 'status-ack' : 'status-ack';
+    const statusText = h.status === 'ack' ? 'ack' : h.status;
+    return `
+      <div class="handler-item">
+        <div class="handler-info">
+          <div class="handler-name">${h.name}</div>
+          ${h.extra ? `<div class="handler-desc">${h.extra}</div>` : ''}
+          ${h.behavior !== 'Normal' ? `<div class="handler-desc">⏱ ${h.behavior}${h.delay ? ' ' + h.delay + 's' : ''}</div>` : ''}
+        </div>
+        <span class="handler-status ${statusClass}">${statusText}</span>
+        <button class="btn btn-sm" onclick="openHandlerConfig('${h.action}')">Configure</button>
+      </div>`;
+  }).join('');
+
+  const cfgCount = handlers.filter(h => h.configurable).length;
+  document.getElementById("handler-count").textContent =
+    `${handlers.length} handlers · ${cfgCount} configurable`;
+}
+
+function openHandlerConfig(action) {
+  editingHandler = handlers.find(h => h.action === action);
+  if (!editingHandler) return;
+
+  const statusSelect = document.getElementById("hmodal-status");
+  const statusLabel = document.getElementById("hmodal-status-label");
+  const certSection = document.getElementById("hmodal-cert-section");
+
+  document.getElementById("hmodal-title").textContent = editingHandler.name;
+  document.getElementById("hmodal-desc").textContent = editingHandler.desc || '';
+
+  // 不可配置的 handler：隐藏状态选择区，显示提示
+  if (!editingHandler.configurable) {
+    document.getElementById("hmodal-status-section").style.display = 'none';
+    certSection.style.display = 'none';
+    document.getElementById("hmodal-interval-section").style.display = 'none';
+    document.getElementById("hmodal-no-config").style.display = 'block';
+  } else {
+    const hasConfig = ['authorize','start_tx','stop_tx'].includes(action);
+    const isBoot = action === 'boot';
+    const isDataTransfer = action === 'data_transfer';
+
+    document.getElementById("hmodal-status-section").style.display = 'block';
+    certSection.style.display = action === 'authorize' ? 'block' : 'none';
+    document.getElementById("hmodal-no-config").style.display = 'none';
+
+    // Interval section (only for BootNotification)
+    const intervalSection = document.getElementById("hmodal-interval-section");
+    intervalSection.style.display = isBoot ? 'block' : 'none';
+    if (isBoot) {
+      document.getElementById("hmodal-interval").value = editingHandler.interval || 86400;
+    }
+
+    if (hasConfig) {
+      // Authorize / StartTransaction / StopTransaction: Authorization status
+      statusLabel.textContent = 'Authorization status';
+      const authStatuses = [
+        'Accepted', 'Blocked', 'Expired', 'Invalid', 'ConcurrentTx'
+      ];
+      statusSelect.innerHTML = authStatuses.map(
+        s => `<option value="${s}" ${editingHandler.status === s ? 'selected' : ''}>${s}</option>`
+      ).join('');
+    } else if (isBoot) {
+      // BootNotification: Registration status
+      statusLabel.textContent = 'Registration status';
+      const bootStatuses = ['Accepted', 'Pending', 'Rejected'];
+      statusSelect.innerHTML = bootStatuses.map(
+        s => `<option value="${s}" ${editingHandler.status === s ? 'selected' : ''}>${s}</option>`
+      ).join('');
+    } else if (isDataTransfer) {
+      // DataTransfer: DataTransfer status
+      statusLabel.textContent = 'DataTransfer status';
+      const dtStatuses = ['Accepted', 'Rejected', 'UnknownMessageId', 'UnknownVendorId'];
+      statusSelect.innerHTML = dtStatuses.map(
+        s => `<option value="${s}" ${editingHandler.status === s ? 'selected' : ''}>${s}</option>`
+      ).join('');
+    } else {
+      // Default fallback
+      statusLabel.textContent = 'Response status';
+      const defaultStatuses = ['Accepted', 'Rejected'];
+      statusSelect.innerHTML = defaultStatuses.map(
+        s => `<option value="${s}" ${editingHandler.status === s ? 'selected' : ''}>${s}</option>`
+      ).join('');
+    }
+
+    // Certificate status (only for Authorize)
+    if (action === 'authorize') {
+      const certStatuses = [
+        'None', 'Accepted', 'SignatureError', 'CertificateExpired',
+        'CertificateRevoked', 'NoCertificateAvailable', 'CertChainError', 'ContractCancelled'
+      ];
+      const certSelect = document.getElementById("hmodal-cert");
+      certSelect.innerHTML = certStatuses.map(
+        s => `<option value="${s}" ${editingHandler.certStatus === s ? 'selected' : ''}>${s}</option>`
+      ).join('');
+    }
+  }
+
+  // 高亮当前 behavior + 显示/隐藏 delay 输入
+  document.querySelectorAll(".behav-btn").forEach(b => {
+    const isActive = b.dataset.val === editingHandler.behavior;
+    b.classList.toggle("active", isActive);
+  });
+  const delayRow = document.getElementById("hmodal-delay-row");
+  const delayInput = document.getElementById("hmodal-delay");
+  delayRow.style.display = editingHandler.behavior === 'Delay' ? 'block' : 'none';
+  delayInput.value = editingHandler.delay || 5;
+
+  document.getElementById("handler-modal").style.display = "flex";
+}
+
+function applyHandlerConfig() {
+  if (!editingHandler) return;
+  if (editingHandler.configurable) {
+    editingHandler.status = document.getElementById("hmodal-status").value;
+    editingHandler.certStatus = document.getElementById("hmodal-cert").value;
+    if (editingHandler.action === 'boot') {
+      editingHandler.interval = parseInt(document.getElementById("hmodal-interval").value) || 86400;
+      editingHandler.extra = `interval: ${editingHandler.interval}`;
+    }
+  }
+  editingHandler.behavior = document.querySelector(".behav-btn.active")?.dataset.val || "Normal";
+  editingHandler.delay = editingHandler.behavior === 'Delay'
+    ? parseInt(document.getElementById("hmodal-delay").value) || 5
+    : 0;
+  // 同步配置到后端
+  const params = new URLSearchParams();
+  if (editingHandler.configurable) params.set('status', editingHandler.status);
+  params.set('behavior', editingHandler.behavior);
+  params.set('delay', editingHandler.delay);
+  if (editingHandler.action === 'boot') params.set('interval', editingHandler.interval || 86400);
+  fetch(`/api/handler-config/${editingHandler.action}?${params}`, { method: 'POST' });
+  closeHandlerModal();
+  renderHandlers();
+}
+
+function closeHandlerModal() {
+  document.getElementById("handler-modal").style.display = "none";
+  editingHandler = null;
+}
+
+document.querySelectorAll('.behav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.behav-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById("hmodal-delay-row").style.display =
+      btn.dataset.val === 'Delay' ? 'block' : 'none';
+    // 更新行为提示文字
+    const hints = { Normal: 'Reply as usual', Drop: 'Drop message silently', Delay: 'Delay before replying' };
+    document.getElementById("hmodal-behav-hint").textContent = hints[btn.dataset.val] || '';
+  });
+});
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    renderHandlers();
+  });
+});
+
+renderHandlers();
+
+// ========== 命令发送 ==========
+let pendingCmd = null;
+
+function sendCmd(cmd, extraParams = {}) {
+  if (!CP_ID) return alert("No charge point selected");
+  pendingCmd = { cmd, extraParams };
+  const titleMap = {
+    'remote-start': 'Remote Start Transaction',
+    'remote-stop': 'Remote Stop Transaction',
+    'reset': 'Reset',
+    'unlock': 'Unlock Connector',
+    'change-config': 'Change Configuration',
+    'get-config': 'Get Configuration',
+    'clear-cache': 'Clear Cache',
+    'update-firmware': 'Update Firmware',
+    'get-diagnostics': 'Get Diagnostics',
+    'set-charging-profile': 'Set Charging Profile',
+    'clear-charging-profile': 'Clear Charging Profile',
+    'get-composite-schedule': 'Get Composite Schedule',
+    'get-local-list': 'Get Local List Version',
+    'send-local-list': 'Send Local List',
+    'trigger': 'Trigger Message',
+    'cancel-reservation': 'Cancel Reservation',
+    'reserve-now': 'Reserve Now',
+  };
+  document.getElementById("cmd-modal-title").textContent = titleMap[cmd] || cmd;
+
+  let bodyHtml = '';
+  if (cmd === 'remote-start') {
+    bodyHtml = `<label>ID Tag:</label><input id="modal-idtag" value="TEST001" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Connector ID:</label><input id="modal-connid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'remote-stop') {
+    bodyHtml = `<label>Transaction ID:</label><input id="modal-txid" type="number" placeholder="Transaction ID" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'reset') {
+    bodyHtml = `<label>Reset Type:</label><select id="modal-reset-type" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="Soft">Soft</option><option value="Hard">Hard</option></select>`;
+  } else if (cmd === 'unlock') {
+    bodyHtml = `<label>Connector ID:</label><input id="modal-connid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'change-config') {
+    bodyHtml = `<label>Key:</label><input id="modal-config-key" placeholder="e.g. HeartbeatInterval" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Value:</label><input id="modal-config-val" placeholder="e.g. 120" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'update-firmware') {
+    const now = new Date().toISOString().slice(0, 16);
+    bodyHtml = `<label>Location (URL):</label><input id="modal-fw-url" placeholder="https://example.com/firmware.bin" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Retrieve Date:</label><input id="modal-fw-date" type="datetime-local" value="${now}" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Retries:</label><input id="modal-fw-retries" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Retry Interval (s):</label><input id="modal-fw-retry-int" type="number" value="60" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'get-diagnostics') {
+    bodyHtml = `<label>Location (URL):</label><input id="modal-diag-url" placeholder="ftp://example.com/upload" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Retries:</label><input id="modal-diag-retries" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Retry Interval (s):</label><input id="modal-diag-retry-int" type="number" value="60" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Start Time (optional):</label><input id="modal-diag-start" type="datetime-local" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Stop Time (optional):</label><input id="modal-diag-stop" type="datetime-local" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'set-charging-profile') {
+    bodyHtml = `<label>Connector ID:</label><input id="modal-cp-connid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Charging Profile ID:</label><input id="modal-cp-profileid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Stack Level:</label><input id="modal-cp-stack" type="number" value="0" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Purpose:</label><select id="modal-cp-purpose" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="ChargePointMaxProfile">ChargePointMaxProfile</option>
+                  <option value="TxDefaultProfile" selected>TxDefaultProfile</option>
+                  <option value="TxProfile">TxProfile</option></select>
+                <label>Kind:</label><select id="modal-cp-kind" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="Absolute" selected>Absolute</option>
+                  <option value="Recurring">Recurring</option>
+                  <option value="Relative">Relative</option></select>
+                <label>Rate Unit:</label><select id="modal-cp-unit" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="A" selected>A (Amps)</option>
+                  <option value="W">W (Watts)</option></select>
+                <label>Limit:</label><input id="modal-cp-limit" type="number" step="0.1" value="16.0" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Start Period (s):</label><input id="modal-cp-start" type="number" value="0" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Duration (s, optional):</label><input id="modal-cp-duration" type="number" placeholder="leave empty for infinite" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Number of Phases (optional):</label><input id="modal-cp-phases" type="number" placeholder="1 or 3" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'clear-charging-profile') {
+    bodyHtml = `<p style="color:#888;margin-bottom:8px;">All fields optional — empty means match all</p>
+                <label>ID:</label><input id="modal-ccp-id" type="number" placeholder="profile id" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Connector ID:</label><input id="modal-ccp-connid" type="number" placeholder="connector id" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Purpose:</label><select id="modal-ccp-purpose" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="">(any)</option>
+                  <option value="ChargePointMaxProfile">ChargePointMaxProfile</option>
+                  <option value="TxDefaultProfile">TxDefaultProfile</option>
+                  <option value="TxProfile">TxProfile</option></select>
+                <label>Stack Level:</label><input id="modal-ccp-stack" type="number" placeholder="stack level" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'get-composite-schedule') {
+    bodyHtml = `<label>Connector ID:</label><input id="modal-gcs-connid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Duration (s):</label><input id="modal-gcs-duration" type="number" value="3600" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Charging Rate Unit:</label><select id="modal-gcs-unit" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="A" selected>A</option><option value="W">W</option></select>`;
+  } else if (cmd === 'send-local-list') {
+    bodyHtml = `<label>List Version:</label><input id="modal-sll-ver" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Update Type:</label><select id="modal-sll-type" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="Differential">Differential</option><option value="Full">Full</option></select>`;
+  } else if (cmd === 'trigger') {
+    bodyHtml = `<label>Requested Message:</label><select id="modal-trig-msg" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                  <option value="BootNotification">BootNotification</option>
+                  <option value="DiagnosticsStatusNotification">DiagnosticsStatusNotification</option>
+                  <option value="FirmwareStatusNotification">FirmwareStatusNotification</option>
+                  <option value="Heartbeat">Heartbeat</option>
+                  <option value="MeterValues">MeterValues</option>
+                  <option value="StatusNotification">StatusNotification</option></select>
+                <label>Connector ID (optional):</label><input id="modal-trig-conn" type="number" placeholder="leave empty" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'cancel-reservation') {
+    bodyHtml = `<label>Reservation ID:</label><input id="modal-cr-rid" type="number" placeholder="Reservation ID" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'reserve-now') {
+    const future = new Date(Date.now() + 3600000).toISOString().slice(0, 16);
+    bodyHtml = `<label>Connector ID:</label><input id="modal-rn-connid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Expiry Date:</label><input id="modal-rn-expiry" type="datetime-local" value="${future}" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>ID Tag:</label><input id="modal-rn-idtag" value="TEST001" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Reservation ID (optional):</label><input id="modal-rn-rid" type="number" placeholder="auto-generated if empty" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Parent ID Tag (optional):</label><input id="modal-rn-pidtag" placeholder="group account" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else {
+    bodyHtml = `<p style="color:#888;">Send <strong>${cmd}</strong> to charge point?</p>`;
+  }
+  document.getElementById("cmd-modal-body").innerHTML = bodyHtml;
+  document.getElementById("cmd-modal").style.display = "flex";
+}
+
+document.getElementById("cmd-modal-send").addEventListener("click", async () => {
+  if (!pendingCmd) return;
+  const { cmd } = pendingCmd;
+  let url = `/api/charge-points/${CP_ID}/${cmd}`;
+  const params = [];
+
+  if (cmd === 'remote-start') {
+    params.push(`connector_id=${document.getElementById("modal-connid")?.value || 1}`);
+    const idTag = document.getElementById("modal-idtag")?.value || 'TEST001';
+    params.push(`id_tag=${encodeURIComponent(idTag)}`);
+    closeModal();
+    fetch(url + '?' + params.join('&'), { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        const ll = document.createElement("div");
+        ll.style.cssText = "color:#a5d6a7;padding:2px 0;";
+        ll.textContent = `→ Sent remote-start: ${JSON.stringify(data)}`;
+        document.getElementById("message-log").appendChild(ll);
+        document.getElementById("message-log").scrollTop = document.getElementById("message-log").scrollHeight;
+        alert(JSON.stringify(data, null, 2));
+      });
+    return;
+  }
+  if (cmd === 'remote-stop') {
+    params.push(`transaction_id=${document.getElementById("modal-txid")?.value || 0}`);
+  }
+  if (cmd === 'reset') {
+    params.push(`reset_type=${document.getElementById("modal-reset-type")?.value || 'Soft'}`);
+  }
+  if (cmd === 'unlock') {
+    params.push(`connector_id=${document.getElementById("modal-connid")?.value || 1}`);
+  }
+  if (cmd === 'change-config') {
+    params.push(`key=${encodeURIComponent(document.getElementById("modal-config-key")?.value || '')}`);
+    params.push(`value=${encodeURIComponent(document.getElementById("modal-config-val")?.value || '')}`);
+  }
+  if (cmd === 'update-firmware') {
+    const fwLocation = document.getElementById("modal-fw-url")?.value?.trim() || '';
+    if (!fwLocation) { alert('Location (URL) must not be empty'); return; }
+    params.push(`location=${encodeURIComponent(fwLocation)}`);
+    params.push(`retrieve_date=${encodeURIComponent(document.getElementById("modal-fw-date")?.value || '')}`);
+    params.push(`retries=${document.getElementById("modal-fw-retries")?.value || 1}`);
+    params.push(`retry_interval=${document.getElementById("modal-fw-retry-int")?.value || 60}`);
+  }
+  if (cmd === 'get-diagnostics') {
+    const diagLocation = document.getElementById("modal-diag-url")?.value?.trim() || '';
+    if (!diagLocation) { alert('Location (URL) must not be empty'); return; }
+    params.push(`location=${encodeURIComponent(diagLocation)}`);
+    params.push(`retries=${document.getElementById("modal-diag-retries")?.value || 1}`);
+    params.push(`retry_interval=${document.getElementById("modal-diag-retry-int")?.value || 60}`);
+    const startTime = document.getElementById("modal-diag-start")?.value;
+    const stopTime = document.getElementById("modal-diag-stop")?.value;
+    if (startTime) params.push(`start_time=${encodeURIComponent(startTime)}`);
+    if (stopTime) params.push(`stop_time=${encodeURIComponent(stopTime)}`);
+  }
+  if (cmd === 'set-charging-profile') {
+    params.push(`connector_id=${document.getElementById("modal-cp-connid")?.value || 1}`);
+    params.push(`charging_profile_id=${document.getElementById("modal-cp-profileid")?.value || 1}`);
+    params.push(`stack_level=${document.getElementById("modal-cp-stack")?.value || 0}`);
+    params.push(`charging_profile_purpose=${document.getElementById("modal-cp-purpose")?.value || 'TxDefaultProfile'}`);
+    params.push(`charging_profile_kind=${document.getElementById("modal-cp-kind")?.value || 'Absolute'}`);
+    params.push(`charging_rate_unit=${document.getElementById("modal-cp-unit")?.value || 'A'}`);
+    params.push(`limit=${document.getElementById("modal-cp-limit")?.value || 16.0}`);
+    params.push(`start_period=${document.getElementById("modal-cp-start")?.value || 0}`);
+    const duration = document.getElementById("modal-cp-duration")?.value;
+    if (duration) params.push(`duration=${duration}`);
+    const phases = document.getElementById("modal-cp-phases")?.value;
+    if (phases) params.push(`number_phases=${phases}`);
+  }
+  if (cmd === 'clear-charging-profile') {
+    const id = document.getElementById("modal-ccp-id")?.value;
+    const connId = document.getElementById("modal-ccp-connid")?.value;
+    const purpose = document.getElementById("modal-ccp-purpose")?.value;
+    const stack = document.getElementById("modal-ccp-stack")?.value;
+    if (id) params.push(`id=${id}`);
+    if (connId) params.push(`connector_id=${connId}`);
+    if (purpose) params.push(`charging_profile_purpose=${purpose}`);
+    if (stack) params.push(`stack_level=${stack}`);
+  }
+  if (cmd === 'get-composite-schedule') {
+    params.push(`connector_id=${document.getElementById("modal-gcs-connid")?.value || 1}`);
+    params.push(`duration=${document.getElementById("modal-gcs-duration")?.value || 3600}`);
+    params.push(`charging_rate_unit=${document.getElementById("modal-gcs-unit")?.value || 'A'}`);
+  }
+  if (cmd === 'send-local-list') {
+    params.push(`list_version=${document.getElementById("modal-sll-ver")?.value || 1}`);
+    params.push(`update_type=${document.getElementById("modal-sll-type")?.value || 'Full'}`);
+  }
+  if (cmd === 'trigger') {
+    params.push(`requested_message=${document.getElementById("modal-trig-msg")?.value || 'Heartbeat'}`);
+    const trigConn = document.getElementById("modal-trig-conn")?.value;
+    if (trigConn) params.push(`connector_id=${trigConn}`);
+  }
+  if (cmd === 'cancel-reservation') {
+    params.push(`reservation_id=${document.getElementById("modal-cr-rid")?.value || 0}`);
+  }
+  if (cmd === 'reserve-now') {
+    params.push(`connector_id=${document.getElementById("modal-rn-connid")?.value || 1}`);
+    params.push(`expiry_date=${encodeURIComponent(document.getElementById("modal-rn-expiry")?.value || '')}`);
+    params.push(`id_tag=${encodeURIComponent(document.getElementById("modal-rn-idtag")?.value || 'TEST001')}`);
+    const rnRid = document.getElementById("modal-rn-rid")?.value;
+    if (rnRid) params.push(`reservation_id=${rnRid}`);
+    const rnPid = document.getElementById("modal-rn-pidtag")?.value;
+    if (rnPid) params.push(`parent_id_tag=${encodeURIComponent(rnPid)}`);
+  }
+
+  closeModal();  // 立即关闭弹窗，不等待桩回复
+
+  const resp = await fetch(url + '?' + params.join('&'), { method: 'POST' });
+  const data = await resp.json();
+  if (resp.ok) {
+    const logLine = document.createElement("div");
+    logLine.style.cssText = "color:#a5d6a7;padding:2px 0;";
+    logLine.textContent = `→ Sent ${cmd}: ${JSON.stringify(data)}`;
+    document.getElementById("message-log").appendChild(logLine);
+    document.getElementById("message-log").scrollTop = document.getElementById("message-log").scrollHeight;
+    alert(JSON.stringify(data, null, 2));
+  } else {
+    const logLine = document.createElement("div");
+    logLine.style.cssText = "color:#ef5350;padding:2px 0;";
+    logLine.textContent = `→ ${cmd} FAILED: ${JSON.stringify(data)}`;
+    document.getElementById("message-log").appendChild(logLine);
+    document.getElementById("message-log").scrollTop = document.getElementById("message-log").scrollHeight;
+    alert('Error: ' + JSON.stringify(data, null, 2));
+  }
+});
+
+function closeModal() {
+  document.getElementById("cmd-modal").style.display = "none";
+  pendingCmd = null;
+}
+
+function filterCommands() {
+  const q = document.getElementById("cmd-search").value.toLowerCase();
+  document.querySelectorAll(".cmd-group").forEach(g => {
+    const has = Array.from(g.querySelectorAll(".cmd-btn")).some(b => b.textContent.toLowerCase().includes(q));
+    g.style.display = has || !q ? "" : "none";
+  });
+}
+
+function saveKeepalive() {
+  const val = document.getElementById("keepalive-interval").value;
+  sendCmd('change-config', {key:'HeartbeatInterval', value:val});
+}
+
+// ========== 连接状态实时更新 ==========
+const cpStatusEvt = new EventSource("/sse/status");
+cpStatusEvt.addEventListener("status_update", (e) => {
+  const online = JSON.parse(e.data).online;
+  const cpId = "{{ cp.charge_box_id }}";
+  const isOnline = online.includes(cpId);
+  const dot = document.getElementById("conn-dot");
+  const status = document.getElementById("conn-status");
+  if (dot && status) {
+    dot.className = "conn-dot " + (isOnline ? "online" : "offline");
+    status.className = "conn-status " + (isOnline ? "online" : "offline");
+    status.textContent = isOnline ? "Connected" : "Disconnected";
+  }
+});
+
+// 切页时立即关闭 SSE，避免浏览器等待连接清理
+window.addEventListener('beforeunload', () => {
+  msgEvt.close();
+  cpStatusEvt.close();
+});
+</script>
+{% endblock %}

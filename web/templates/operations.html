@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>🔧 远程操作控制台</h1>
+
+<div class="panel">
+  <h2>选择充电桩</h2>
+  <select id="cp-select" style="width:300px; padding:8px;">
+    <option value="">-- 选择充电桩 --</option>
+    {% for cp in charge_points %}
+    <option value="{{ cp.charge_box_id }}" {% if cp.online %}data-online="1"{% endif %}>
+      {{ cp.charge_box_id }} ({{ cp.vendor or '-' }}) {% if cp.online %}● 在线{% else %}○ 离线{% endif %}
+    </option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="panel" id="ops-panel" style="display:none;">
+  <h2>命令发送</h2>
+
+  <!-- 基本控制 -->
+  <h3 style="font-size:14px;color:#888;margin:12px 0 8px;">Device Control</h3>
+  <div class="ops-grid">
+    <button class="btn" onclick="sendOp('reset', {reset_type: 'Soft'})">软复位</button>
+    <button class="btn btn-danger" onclick="sendOp('reset', {reset_type: 'Hard'})">硬复位</button>
+    <button class="btn" onclick="sendOp('clear-cache')">清除缓存</button>
+    <button class="btn" onclick="sendOp('get-config')">读取配置</button>
+  </div>
+  <div class="ops-inline" style="margin-top:12px;">
+    <input type="text" id="op_config_key" placeholder="配置键" style="width:150px;">
+    <input type="text" id="op_config_value" placeholder="配置值" style="width:150px;">
+    <button class="btn" onclick="sendOp('change-config', {key: document.getElementById('op_config_key').value, value: document.getElementById('op_config_value').value})">修改配置</button>
+  </div>
+
+  <!-- 事务控制 -->
+  <h3 style="font-size:14px;color:#888;margin:16px 0 8px;">Transaction Control</h3>
+  <div class="ops-inline">
+    <input type="text" id="op_id_tag" placeholder="标签ID" value="TEST001" style="width:150px;">
+    <input type="number" id="op_connector_id" value="1" style="width:60px;">
+    <button class="btn btn-success" onclick="sendOp('remote-start', {id_tag: document.getElementById('op_id_tag').value, connector_id: parseInt(document.getElementById('op_connector_id').value)})">远程启动充电</button>
+    <input type="number" id="op_tx_id" placeholder="事务ID" style="width:100px;">
+    <button class="btn btn-danger" onclick="sendOp('remote-stop', {transaction_id: parseInt(document.getElementById('op_tx_id').value)})">远程停止充电</button>
+    <input type="number" id="op_unlock_conn" placeholder="连接器" value="1" style="width:80px;">
+    <button class="btn" onclick="sendOp('unlock', {connector_id: parseInt(document.getElementById('op_unlock_conn').value)})">解锁连接器</button>
+  </div>
+
+  <!-- 固件管理 -->
+  <h3 style="font-size:14px;color:#888;margin:16px 0 8px;">Firmware & Diagnostics</h3>
+  <div class="ops-inline">
+    <input type="text" id="op_fw_url" placeholder="固件 URL" style="width:250px;">
+    <input type="datetime-local" id="op_fw_date" style="width:180px;">
+    <input type="number" id="op_fw_retries" value="1" style="width:60px;" title="Retries">
+    <input type="number" id="op_fw_retry_int" value="60" style="width:60px;" title="Retry Interval">
+    <button class="btn" onclick="sendOp('update-firmware', {location: document.getElementById('op_fw_url').value, retrieve_date: document.getElementById('op_fw_date').value, retries: parseInt(document.getElementById('op_fw_retries').value), retry_interval: parseInt(document.getElementById('op_fw_retry_int').value)})">固件更新</button>
+  </div>
+  <div class="ops-inline" style="margin-top:8px;">
+    <input type="text" id="op_diag_url" placeholder="诊断上传 URL" style="width:250px;">
+    <input type="number" id="op_diag_retries" value="1" style="width:60px;">
+    <input type="number" id="op_diag_retry_int" value="60" style="width:60px;">
+    <button class="btn" onclick="sendOp('get-diagnostics', {location: document.getElementById('op_diag_url').value, retries: parseInt(document.getElementById('op_diag_retries').value), retry_interval: parseInt(document.getElementById('op_diag_retry_int').value)})">获取诊断</button>
+  </div>
+
+  <!-- 智能充电 -->
+  <h3 style="font-size:14px;color:#888;margin:16px 0 8px;">Smart Charging</h3>
+  <div class="ops-inline">
+    <input type="number" id="op_sp_connid" value="1" style="width:60px;" title="Connector">
+    <input type="number" id="op_sp_profileid" value="1" style="width:60px;" title="Profile ID">
+    <input type="number" id="op_sp_stack" value="0" style="width:60px;" title="Stack">
+    <select id="op_sp_purpose" style="width:130px;">
+      <option value="TxDefaultProfile">TxDefault</option>
+      <option value="ChargePointMaxProfile">CPMax</option>
+      <option value="TxProfile">TxProfile</option>
+    </select>
+    <input type="number" id="op_sp_limit" value="16.0" step="0.1" style="width:70px;" title="Limit (A)">
+    <button class="btn" onclick="sendOp('set-charging-profile', {connector_id: document.getElementById('op_sp_connid').value, charging_profile_id: document.getElementById('op_sp_profileid').value, stack_level: document.getElementById('op_sp_stack').value, charging_profile_purpose: document.getElementById('op_sp_purpose').value, limit: document.getElementById('op_sp_limit').value})">设置充电曲线</button>
+  </div>
+  <div class="ops-inline" style="margin-top:8px;">
+    <input type="number" id="op_cp_connid" value="1" style="width:60px;" title="Connector">
+    <input type="number" id="op_cp_duration" value="3600" style="width:80px;" title="Duration (s)">
+    <button class="btn" onclick="sendOp('get-composite-schedule', {connector_id: document.getElementById('op_cp_connid').value, duration: document.getElementById('op_cp_duration').value})">获取充电计划</button>
+    <button class="btn" onclick="sendOp('clear-charging-profile', {connector_id: document.getElementById('op_cp_connid').value})">清除充电曲线</button>
+  </div>
+
+  <!-- 其他 -->
+  <h3 style="font-size:14px;color:#888;margin:16px 0 8px;">Other</h3>
+  <div class="ops-inline">
+    <select id="op_trig_msg" style="width:160px;">
+      <option value="BootNotification">BootNotification</option>
+      <option value="Heartbeat">Heartbeat</option>
+      <option value="MeterValues">MeterValues</option>
+      <option value="StatusNotification">StatusNotification</option>
+    </select>
+    <input type="number" id="op_trig_conn" placeholder="连接器(可选)" style="width:100px;">
+    <button class="btn" onclick="sendOp('trigger', {requested_message: document.getElementById('op_trig_msg').value, connector_id: document.getElementById('op_trig_conn').value || undefined})">触发消息</button>
+    <button class="btn" onclick="sendOp('get-local-list')">本地列表版本</button>
+    <input type="number" id="op_sll_ver" value="1" style="width:60px;">
+    <select id="op_sll_type" style="width:100px;"><option value="Full">Full</option><option value="Differential">Diff</option></select>
+    <button class="btn" onclick="sendOp('send-local-list', {list_version: document.getElementById('op_sll_ver').value, update_type: document.getElementById('op_sll_type').value})">发送本地列表</button>
+  </div>
+  <div class="ops-inline" style="margin-top:8px;">
+    <input type="number" id="op_resv_rid" placeholder="预约ID" style="width:100px;">
+    <button class="btn" onclick="sendOp('cancel-reservation', {reservation_id: document.getElementById('op_resv_rid').value})">取消预约</button>
+    <input type="text" id="op_resv_idtag" value="TEST001" style="width:120px;">
+    <input type="datetime-local" id="op_resv_expiry" style="width:180px;">
+    <input type="number" id="op_resv_connid" value="1" style="width:60px;">
+    <button class="btn" onclick="sendOp('reserve-now', {connector_id: document.getElementById('op_resv_connid').value, expiry_date: document.getElementById('op_resv_expiry').value, id_tag: document.getElementById('op_resv_idtag').value})">预约充电桩</button>
+  </div>
+
+  <div id="op-result" style="margin-top:16px; padding:12px; background:#f5f5f5; border-radius:6px; min-height:40px;"></div>
+</div>
+
+<script>
+document.getElementById("cp-select").addEventListener("change", function() {
+  document.getElementById("ops-panel").style.display = this.value ? "block" : "none";
+  // 初始化日期默认值
+  const now = new Date();
+  const isoNow = now.toISOString().slice(0, 16);
+  const isoFuture = new Date(now.getTime() + 3600000).toISOString().slice(0, 16);
+  const fwDate = document.getElementById("op_fw_date");
+  const resvExpiry = document.getElementById("op_resv_expiry");
+  if (fwDate && !fwDate.value) fwDate.value = isoNow;
+  if (resvExpiry && !resvExpiry.value) resvExpiry.value = isoFuture;
+});
+
+async function sendOp(endpoint, params) {
+  const cpId = document.getElementById("cp-select").value;
+  if (!cpId) return alert("请选择充电桩");
+
+  let url = `/api/charge-points/${cpId}/${endpoint}`;
+  const queryParts = [];
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      queryParts.push(`${k}=${encodeURIComponent(v)}`);
+    }
+  }
+  if (queryParts.length) url += '?' + queryParts.join('&');
+
+  const resp = await fetch(url, {method: 'POST'});
+  const data = await resp.json();
+  const resultEl = document.getElementById("op-result");
+  resultEl.innerHTML = resp.ok
+    ? `<span style="color:green">✓ <strong>${endpoint}</strong>: ${JSON.stringify(data, null, 2)}</span>`
+    : `<span style="color:red">✗ <strong>${endpoint}</strong>: ${data.detail}</span>`;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>📊 仪表盘</h1>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-value">{{ online_count }}</div>
+    <div class="stat-label">在线充电桩</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ total_count }}</div>
+    <div class="stat-label">注册充电桩</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ transactions|length }}</div>
+    <div class="stat-label">最近交易</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>注册充电桩</h2>
+  {% if charge_points %}
+    <div id="online-status">
+      {% for cp in charge_points %}
+      <div class="cp-row {% if cp.online %}online{% else %}offline{% endif %}">
+        <span class="status-dot"></span>
+        <a href="/charge-points/{{ cp.charge_box_id }}">{{ cp.charge_box_id }}</a>
+        <span class="cp-meta">{{ cp.vendor or '-' }} / {{ cp.model or '-' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="empty">尚无充电桩注册，等待连接中...</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>📡 实时报文</h2>
+  <div class="pager-bar">
+    <span id="page-info" style="font-size:13px;color:#888;min-width:150px;">Showing 1-40 of 0</span>
+    <span style="flex:1;"></span>
+    <button class="btn btn-sm" id="btn-first" onclick="goPage('first')">«</button>
+    <button class="btn btn-sm" id="btn-prev" onclick="goPage('prev')">‹</button>
+    <span id="page-num" style="font-size:13px;color:#888;min-width:45px;text-align:center;">0/1</span>
+    <button class="btn btn-sm" id="btn-next" onclick="goPage('next')">›</button>
+    <button class="btn btn-sm" id="btn-last" onclick="goPage('last')">»</button>
+    <span style="flex:1;"></span>
+    <select id="page-size-select" onchange="changePageSize()" style="padding:3px 6px;font-size:12px;border:1px solid #ddd;border-radius:4px;">
+      <option value="10">10 / p</option>
+      <option value="25">25 / p</option>
+      <option value="40" selected>40 / p</option>
+      <option value="50">50 / p</option>
+      <option value="100">100 / p</option>
+    </select>
+    <button class="btn btn-sm" id="pause-btn" onclick="togglePause()">⏸ 暂停</button>
+    <button class="btn btn-sm" id="theme-btn" onclick="toggleLogTheme()">🌙 暗色</button>
+    <button class="btn btn-sm" onclick="exportLog()" title="导出为 JSON">⬇ 导出</button>
+    <button class="btn btn-sm btn-danger" onclick="clearLog()" title="清除所有报文">🗑 清除</button>
+  </div>
+  <div id="message-log" class="log-container light" style="max-height:460px;">
+    <div class="log-placeholder">等待充电桩连接...</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>最近交易</h2>
+  {% if transactions %}
+  <table>
+    <thead>
+      <tr><th>事务 ID</th><th>标签</th><th>开始时间</th><th>结束时间</th><th>电量 (Wh)</th></tr>
+    </thead>
+    <tbody>
+      {% for tx in transactions %}
+      <tr>
+        <td>{{ tx.transaction_id }}</td>
+        <td>{{ tx.id_tag }}</td>
+        <td>{{ tx.start_timestamp.strftime('%H:%M:%S') if tx.start_timestamp else '-' }}</td>
+        <td>{{ tx.end_timestamp.strftime('%H:%M:%S') if tx.end_timestamp else '进行中...' }}</td>
+        <td>{{ (tx.meter_stop - tx.meter_start) if tx.meter_stop else '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="empty">暂无交易记录</p>
+  {% endif %}
+</div>
+
+<script>
+// ========= 报文分页逻辑 =========
+let PAGE_SIZE = 40;
+let allMessages = [];      // 完整报文列表（从旧到新）
+let currentOffset = 0;     // 当前页距最新一条的 offset（0=最后一页）
+let paused = false;
+let autoScroll = true;
+
+const msgLog = document.getElementById("message-log");
+const pageInfo = document.getElementById("page-info");
+const pageNum = document.getElementById("page-num");
+
+// 初始加载最新一页
+fetchMessages(0, 1000);
+
+// SSE 实时接收新报文
+const msgEvt = new EventSource("/sse/messages");
+msgEvt.addEventListener("ocpp_messages", (e) => {
+  const msgs = JSON.parse(e.data);
+  msgs.forEach(m => allMessages.push(m));
+
+  if (!paused && autoScroll) {
+    currentOffset = 0;
+    renderPage();
+  } else if (!paused) {
+    updatePager();
+  }
+});
+
+// 切页时立即关闭 SSE，避免浏览器等待连接清理
+window.addEventListener('beforeunload', () => {
+  msgEvt.close();
+  statusEvt.close();
+});
+
+function fetchMessages(offset, limit) {
+  limit = limit || PAGE_SIZE;
+  fetch(`/api/messages?offset=${offset}&limit=${limit}`)
+    .then(r => r.json())
+    .then(data => {
+      const localMap = {};
+      allMessages.forEach(m => { localMap[m.seq] = m; });
+      data.messages.forEach(m => { localMap[m.seq] = m; });
+      allMessages = Object.values(localMap).sort((a, b) => a.seq - b.seq);
+      currentOffset = offset;
+      autoScroll = (offset === 0);
+      renderPage();
+    });
+}
+
+function renderPage() {
+  const total = allMessages.length;
+  const start = Math.max(0, total - currentOffset - PAGE_SIZE);
+  const end = total - currentOffset;
+  const page = allMessages.slice(start, end)
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return b.timestamp.localeCompare(a.timestamp);
+      return (a.msg_type || 0) - (b.msg_type || 0);
+    });
+
+  msgLog.innerHTML = "";
+  if (page.length === 0) {
+    msgLog.innerHTML = '<div class="log-placeholder">暂无报文</div>';
+  } else {
+    page.forEach(m => {
+      const dir = m.direction === "IN" ? "◀" : "▶";
+      const colorClass = m.direction === "IN" ? "log-in" : "log-out";
+      const payloadStr = typeof m.payload === 'object'
+        ? JSON.stringify(m.payload)
+        : String(m.payload || '');
+      const div = document.createElement("div");
+      div.className = `log-line ${colorClass}`;
+      div.innerHTML = `<span class="log-ts">${m.timestamp}</span> <span class="log-cp">[${m.charge_box_id}]</span> <strong>${dir}</strong> ${m.action} <span class="log-payload">${payloadStr}</span>`;
+      msgLog.appendChild(div);
+    });
+  }
+  updatePager();
+}
+
+function updatePager() {
+  const total = allMessages.length;
+  const ps = PAGE_SIZE;
+  const p = total === 0 ? 1 : Math.floor(currentOffset / ps) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / ps));
+  const startIdx = total === 0 ? 0 : Math.max(1, total - currentOffset - ps + 1);
+  const endIdx = Math.max(0, total - currentOffset);
+  pageInfo.textContent = `Showing ${startIdx}-${endIdx} of ${total}`;
+  pageNum.textContent = `${p}/${totalPages}`;
+  document.getElementById("btn-prev").disabled = currentOffset === 0;
+  document.getElementById("btn-first").disabled = currentOffset === 0;
+  document.getElementById("btn-next").disabled = currentOffset + ps >= total;
+  document.getElementById("btn-last").disabled = currentOffset >= Math.max(0, total - ps);
+}
+
+function goPage(dir) {
+  const total = allMessages.length;
+  const ps = PAGE_SIZE;
+  if (dir === 'first') {
+    currentOffset = 0;
+    autoScroll = true;
+  } else if (dir === 'last') {
+    currentOffset = Math.max(0, total - ps);
+    autoScroll = false;
+  } else if (dir === 'prev') {
+    currentOffset = Math.max(0, currentOffset - ps);
+    autoScroll = (currentOffset <= ps);
+  } else if (dir === 'next') {
+    currentOffset = Math.min(total, currentOffset + ps);
+    autoScroll = false;
+  }
+  renderPage();
+}
+
+function changePageSize() {
+  PAGE_SIZE = parseInt(document.getElementById("page-size-select").value);
+  currentOffset = 0;
+  autoScroll = true;
+  renderPage();
+}
+
+function togglePause() {
+  paused = !paused;
+  const btn = document.getElementById("pause-btn");
+  btn.textContent = paused ? "▶ 继续" : "⏸ 暂停";
+  btn.style.background = paused ? "#ff9800" : "";
+  btn.style.color = paused ? "#fff" : "";
+}
+
+function toggleLogTheme() {
+  const log = document.getElementById("message-log");
+  const btn = document.getElementById("theme-btn");
+  if (log.classList.contains("dark")) {
+    log.classList.remove("dark");
+    log.classList.add("light");
+    btn.innerHTML = "☀ 亮色";
+  } else {
+    log.classList.remove("light");
+    log.classList.add("dark");
+    btn.innerHTML = "🌙 暗色";
+  }
+}
+
+function exportLog() {
+  const lines = allMessages.map(m => {
+    const dir = m.direction === "IN" ? "◀" : "▶";
+    const payloadStr = typeof m.payload === 'object' ? JSON.stringify(m.payload) : String(m.payload || '');
+    return `${m.timestamp} [${m.charge_box_id}] ${dir} ${m.action} ${payloadStr}`;
+  });
+  const blob = new Blob([lines.join('\n')], {type: 'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ocpp_log_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+}
+
+async function clearLog() {
+  if (!confirm('确认清除所有报文记录？')) return;
+  await fetch('/api/messages', {method: 'DELETE'});
+  allMessages = [];
+  currentOffset = 0;
+  renderPage();
+}
+
+// ========= SSE 在线状态 =========
+const statusEvt = new EventSource("/sse/status");
+statusEvt.addEventListener("status_update", (e) => {
+  const data = JSON.parse(e.data);
+  document.querySelector("#online-status")?.querySelectorAll(".cp-row").forEach(row => {
+    const link = row.querySelector("a");
+    if (link && data.online.includes(link.textContent)) {
+      row.classList.add("online");
+      row.classList.remove("offline");
+    } else {
+      row.classList.add("offline");
+      row.classList.remove("online");
+    }
+  });
+});
+</script>
+{% endblock %}

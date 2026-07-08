@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>🏷️ 标签管理</h1>
+
+<div class="panel">
+  <h2>添加标签</h2>
+  <div class="ops-inline">
+    <input type="text" id="new_tag_id" placeholder="标签 ID" style="width:200px;">
+    <button class="btn btn-success" onclick="addTag()">添加</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>标签列表</h2>
+  {% if tags %}
+  <table>
+    <thead><tr><th>标签 ID</th><th>父标签</th><th>过期时间</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for tag in tags %}
+      <tr>
+        <td>{{ tag.id_tag }}</td>
+        <td>{{ tag.parent_id_tag or '-' }}</td>
+        <td>{{ tag.expiry_date.strftime('%Y-%m-%d') if tag.expiry_date else '-' }}</td>
+        <td>
+          {% if tag.blocked %}
+          <span style="color:red">已禁用</span>
+          {% else %}
+          <span style="color:green">正常</span>
+          {% endif %}
+        </td>
+        <td>
+          <button class="btn btn-sm" onclick="toggleBlock('{{ tag.id_tag }}', {{ 'false' if tag.blocked else 'true' }})">
+            {{ '解禁' if tag.blocked else '禁用' }}
+          </button>
+          <button class="btn btn-sm btn-danger" onclick="deleteTag('{{ tag.id_tag }}')">删除</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">暂无标签</p>
+  {% endif %}
+</div>
+
+<script>
+async function addTag() {
+  const id = document.getElementById("new_tag_id").value;
+  if (!id) return;
+  await fetch(`/api/tags?id_tag=${id}`, {method: 'POST'});
+  location.reload();
+}
+async function toggleBlock(idTag, blocked) {
+  await fetch(`/api/tags/${idTag}/block?blocked=${blocked}`, {method: 'POST'});
+  location.reload();
+}
+async function deleteTag(idTag) {
+  if (!confirm(`确定删除标签 ${idTag}？`)) return;
+  await fetch(`/api/tags/${idTag}`, {method: 'DELETE'});
+  location.reload();
+}
+</script>
+{% endblock %}

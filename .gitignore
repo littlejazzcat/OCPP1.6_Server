@@ -1,0 +1,37 @@
+# PyInstaller
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# IDE
+.vscode/
+
+# 数据库
+*.db
+
+# 测试
+tests/
+
+# 文档
+update/
+readme/*方案*.md
+需求/
+
+# 需求/issue
+issue/
+
+# 安装脚本
+install.bat
+install.sh
+build.bat
+
+# 临时文件
+*.log
+.DS_Store
+Thumbs.db

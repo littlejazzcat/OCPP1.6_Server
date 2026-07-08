@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OCPP 1.6 CSMS</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260704">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">⚡ OCPP 1.6 CSMS</div>
+    <div class="nav-links">
+      <a href="/">仪表盘</a>
+      <a href="/charge-points">充电桩</a>
+      <a href="/transactions">交易记录</a>
+      <a href="/tags">标签管理</a>
+      <a href="/operations">远程操作</a>
+      <a href="/docs" target="_blank">API 文档</a>
+    </div>
+  </nav>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

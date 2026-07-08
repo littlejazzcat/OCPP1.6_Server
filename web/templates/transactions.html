@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>💰 交易记录</h1>
+
+<div style="margin-bottom:12px;">
+  <button class="btn btn-sm btn-danger" onclick="clearTransactions()">🗑 清除所有交易</button>
+</div>
+
+{% if transactions %}
+<table>
+  <thead>
+    <tr>
+      <th>事务 ID</th>
+      <th>ChargeBox</th>
+      <th>连接器</th>
+      <th>标签</th>
+      <th>开始时间</th>
+      <th>结束时间</th>
+      <th>起始电量</th>
+      <th>结束电量</th>
+      <th>消耗 (Wh)</th>
+      <th>停止原因</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for tx in transactions %}
+    <tr>
+      <td>{{ tx.transaction_id }}</td>
+      <td>{{ tx.charge_point_id }}</td>
+      <td>#{{ tx.connector_id }}</td>
+      <td>{{ tx.id_tag }}</td>
+      <td>{{ tx.start_timestamp.strftime('%m-%d %H:%M:%S') if tx.start_timestamp else '-' }}</td>
+      <td>{{ tx.end_timestamp.strftime('%m-%d %H:%M:%S') if tx.end_timestamp else '进行中' }}</td>
+      <td>{{ tx.meter_start }}</td>
+      <td>{{ tx.meter_stop or '-' }}</td>
+      <td><strong>{{ (tx.meter_stop - tx.meter_start) if tx.meter_stop else '-' }}</strong></td>
+      <td>{{ tx.stop_reason or '-' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">暂无交易记录</p>
+{% endif %}
+
+<script>
+async function clearTransactions() {
+  if (!confirm('确认清除所有交易记录？此操作不可撤销。')) return;
+  await fetch('/api/transactions', {method: 'DELETE'});
+  location.reload();
+}
+</script>
+{% endblock %}
