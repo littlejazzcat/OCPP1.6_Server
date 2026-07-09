@@ -527,6 +527,13 @@ class ChargePointHandler(BaseChargePoint):
     ) -> str:
         """预约充电桩"""
         import random
+        import re
+        # 标准化日期格式：补秒和 Z 后缀
+        if expiry_date and not expiry_date.endswith('Z'):
+            if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$', expiry_date):
+                expiry_date = expiry_date + ':00Z'
+            elif not expiry_date.endswith('Z'):
+                expiry_date = expiry_date + 'Z'
         kwargs: dict = {
             "connector_id": connector_id,
             "expiry_date": expiry_date,
