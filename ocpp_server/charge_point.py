@@ -106,7 +106,7 @@ class ChargePointHandler(BaseChargePoint):
         return call_result.Heartbeat(current_time=datetime.now(tz=timezone.utc).isoformat())
 
     @on(Action.authorize)
-    async def on_authorize(self, id_tag: str):
+    async def on_authorize(self, id_tag: str, **kwargs):
         logger.info(f"[{self.id}] Authorize: id_tag={id_tag}")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="Authorize (CALL)", payload={"id_tag": id_tag, **kwargs}))
         cfg = handler_config.get_config("authorize")

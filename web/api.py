@@ -1,18 +1,41 @@
 """REST API 端点"""
 
 import asyncio
+import json
+import random
+import re
+import shutil
+import tempfile
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
 
+import httpx
 from fastapi import Depends, HTTPException
+from packaging.version import Version
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .app import app
+from config import VERSION
 from models.database import async_session, get_session
-from models.schema import ChargePoint, Transaction, OcppTag
+from models.schema import ChargePoint, Transaction, OcppTag, Connector, MeterValue
 from services import cp_service, auth_service, transaction_service
 from ocpp_server.server import get_connection, get_online_charge_points
 from ocpp_server.message_bus import get_history_page
 from ocpp_server import handler_config
-from config import VERSION
+
+REPO = "littlejazzcat/OCPP1.6_Server"
+GITEE_REPO = "littlejazzcat/OCPP1.6_Server"
+
+SOURCES = [
+    {"name": "GitHub", "api": f"https://api.github.com/repos/{REPO}/releases/latest",
+     "headers": {"Accept": "application/vnd.github+json"}},
+    {"name": "Gitee", "api": f"https://gitee.com/api/v5/repos/{GITEE_REPO}/releases/latest", "headers": {}},
+]
+_current_version = None
+_latest_info = None
+_download_path = None
+_download_progress = 0
 
 
 # ==================== 充电桩 API ====================
@@ -21,17 +44,8 @@ from config import VERSION
 async def api_list_charge_points():
     async with async_session() as db:
         cps = await cp_service.list_all(db)
-    return [
-        {
-            "id": cp.id,
-            "charge_box_id": cp.charge_box_id,
-            "vendor": cp.vendor,
-            "model": cp.model,
-            "online": cp.online,
-            "last_heartbeat": cp.last_heartbeat.isoformat() if cp.last_heartbeat else None,
-        }
-        for cp in cps
-    ]
+    return [{"id": cp.id, "charge_box_id": cp.charge_box_id, "vendor": cp.vendor, "model": cp.model,
+             "online": cp.online, "last_heartbeat": cp.last_heartbeat.isoformat() if cp.last_heartbeat else None} for cp in cps]
 
 
 @app.get("/api/charge-points/online")
@@ -43,282 +57,149 @@ async def api_online_charge_points():
 
 @app.post("/api/charge-points/{charge_box_id}/reset")
 async def api_reset(charge_box_id: str, reset_type: str = "Soft"):
-    """向指定充电桩下发 Reset 命令"""
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_reset(reset_type)
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_reset(reset_type)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/remote-start")
 async def api_remote_start(charge_box_id: str, id_tag: str, connector_id: int = 1):
-    """远程启动充电"""
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_remote_start(id_tag, connector_id)
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_remote_start(id_tag, connector_id)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/remote-stop")
 async def api_remote_stop(charge_box_id: str, transaction_id: int):
-    """远程停止充电"""
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_remote_stop(transaction_id)
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_remote_stop(transaction_id)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/change-config")
 async def api_change_config(charge_box_id: str, key: str, value: str):
-    """修改充电桩配置"""
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_change_configuration(key, value)
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_change_configuration(key, value)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/clear-cache")
 async def api_clear_cache(charge_box_id: str):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_clear_cache()
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_clear_cache()}
 
 
 @app.post("/api/charge-points/{charge_box_id}/unlock")
 async def api_unlock(charge_box_id: str, connector_id: int):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_unlock_connector(connector_id)
-    return {"status": status}
-
-
-@app.post("/api/charge-points/{charge_box_id}/get-config")
-async def api_get_config(charge_box_id: str):
-    """读取充电桩配置"""
-    handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    result = await handler.send_get_configuration()
-    return {
-        "configuration_key": result.configuration_key,
-        "unknown_key": result.unknown_key,
-    }
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_unlock_connector(connector_id)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/update-firmware")
-async def api_update_firmware(
-    charge_box_id: str, location: str, retrieve_date: str,
-    retries: int = 1, retry_interval: int = 60
-):
-    """下发固件更新"""
+async def api_update_firmware(charge_box_id: str, location: str, retrieve_date: str, retries: int = 1, retry_interval: int = 60):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_update_firmware(location, retrieve_date, retries, retry_interval)
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_update_firmware(location, retrieve_date, retries, retry_interval)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/get-diagnostics")
-async def api_get_diagnostics(
-    charge_box_id: str, location: str,
-    retries: int = 1, retry_interval: int = 60,
-    start_time: str = None, stop_time: str = None
-):
-    """请求诊断文件上传"""
+async def api_get_diagnostics(charge_box_id: str, location: str, retries: int = 1, retry_interval: int = 60, start_time: str = None, stop_time: str = None):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
     result = await handler.send_get_diagnostics(location, retries, retry_interval, start_time, stop_time)
     return {"file_name": result.file_name}
 
 
 @app.post("/api/charge-points/{charge_box_id}/set-charging-profile")
-async def api_set_charging_profile(
-    charge_box_id: str,
-    connector_id: int,
-    charging_profile_id: int,
-    stack_level: int,
-    charging_profile_purpose: str = "TxProfile",
-    charging_profile_kind: str = "Absolute",
-    charging_rate_unit: str = "A",
-    limit: float = 16.0,
-    start_period: int = 0,
-    duration: int = None,
-    number_phases: int = None,
-):
-    """设置充电曲线"""
+async def api_set_charging_profile(charge_box_id: str, connector_id: int, charging_profile_id: int, stack_level: int,
+    charging_profile_purpose: str = "TxProfile", charging_profile_kind: str = "Absolute", charging_rate_unit: str = "A",
+    limit: float = 16.0, start_period: int = 0, duration: int = None, number_phases: int = None):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
     schedule_period = {"start_period": start_period, "limit": limit}
-    if number_phases is not None:
-        schedule_period["number_phases"] = number_phases
-    
-    charging_schedule = {
-        "charging_rate_unit": charging_rate_unit,
-        "charging_schedule_period": [schedule_period],
-    }
-    if duration is not None:
-        charging_schedule["duration"] = duration
-    
-    cs_charging_profiles = {
-        "charging_profile_id": charging_profile_id,
-        "stack_level": stack_level,
-        "charging_profile_purpose": charging_profile_purpose,
-        "charging_profile_kind": charging_profile_kind,
-        "charging_schedule": charging_schedule,
-    }
-    
-    status = await handler.send_set_charging_profile(connector_id, cs_charging_profiles)
-    return {"status": status}
+    if number_phases is not None: schedule_period["number_phases"] = number_phases
+    charging_schedule = {"charging_rate_unit": charging_rate_unit, "charging_schedule_period": [schedule_period]}
+    if duration is not None: charging_schedule["duration"] = duration
+    cs_charging_profiles = {"charging_profile_id": charging_profile_id, "stack_level": stack_level,
+        "charging_profile_purpose": charging_profile_purpose, "charging_profile_kind": charging_profile_kind,
+        "charging_schedule": charging_schedule}
+    return {"status": await handler.send_set_charging_profile(connector_id, cs_charging_profiles)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/clear-charging-profile")
-async def api_clear_charging_profile(
-    charge_box_id: str,
-    connector_id: int = None,
-    charging_profile_purpose: str = None,
-    stack_level: int = None,
-    id: int = None,
-):
-    """清除充电曲线"""
+async def api_clear_charging_profile(charge_box_id: str, connector_id: int = None, charging_profile_purpose: str = None, stack_level: int = None, id: int = None):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_clear_charging_profile(
-        connector_id=connector_id,
-        charging_profile_purpose=charging_profile_purpose,
-        stack_level=stack_level,
-        id_=id,
-    )
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_clear_charging_profile(connector_id, charging_profile_purpose, stack_level, id)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/get-composite-schedule")
-async def api_get_composite_schedule(
-    charge_box_id: str, connector_id: int, duration: int,
-    charging_rate_unit: str = "A"
-):
-    """获取组合充电计划"""
+async def api_get_composite_schedule(charge_box_id: str, connector_id: int, duration: int, charging_rate_unit: str = "A"):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
     result = await handler.send_get_composite_schedule(connector_id, duration, charging_rate_unit)
-    return {
-        "status": result.status,
-        "connector_id": result.connector_id,
-        "schedule_start": result.schedule_start,
-        "charging_schedule": result.charging_schedule,
-    }
+    return {"status": result.status, "connector_id": result.connector_id, "schedule_start": result.schedule_start, "charging_schedule": result.charging_schedule}
 
 
 @app.post("/api/charge-points/{charge_box_id}/get-local-list")
 async def api_get_local_list(charge_box_id: str):
-    """获取本地授权列表版本"""
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    result = await handler.send_get_local_list_version()
-    return {"list_version": result.list_version}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"list_version": (await handler.send_get_local_list_version()).list_version}
 
 
 @app.post("/api/charge-points/{charge_box_id}/send-local-list")
-async def api_send_local_list(
-    charge_box_id: str, list_version: int, update_type: str
-):
-    """发送本地授权列表"""
+async def api_send_local_list(charge_box_id: str, list_version: int, update_type: str):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    result = await handler.send_send_local_list(list_version, update_type)
-    return {"status": result.status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": (await handler.send_send_local_list(list_version, update_type)).status}
 
 
 @app.post("/api/charge-points/{charge_box_id}/trigger")
-async def api_trigger(
-    charge_box_id: str, requested_message: str, connector_id: int = None
-):
-    """触发充电桩上报指定消息"""
+async def api_trigger(charge_box_id: str, requested_message: str, connector_id: int = None):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
     try:
         await handler.send_trigger_message(requested_message, connector_id)
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="TriggerMessage timeout: charge point not responding")
+        raise HTTPException(status_code=504, detail="TriggerMessage timeout")
     return {"status": "Accepted"}
 
 
 @app.post("/api/charge-points/{charge_box_id}/cancel-reservation")
 async def api_cancel_reservation(charge_box_id: str, reservation_id: int):
-    """取消预约"""
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_cancel_reservation(reservation_id)
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_cancel_reservation(reservation_id)}
 
 
 @app.post("/api/charge-points/{charge_box_id}/reserve-now")
-async def api_reserve_now(
-    charge_box_id: str, connector_id: int, expiry_date: str,
-    id_tag: str, reservation_id: int = None, parent_id_tag: str = None
-):
-    """预约充电桩"""
+async def api_reserve_now(charge_box_id: str, connector_id: int, expiry_date: str, id_tag: str, reservation_id: int = None, parent_id_tag: str = None):
     handler = get_connection(charge_box_id)
-    if handler is None:
-        raise HTTPException(status_code=404, detail="Charge point not online")
-    status = await handler.send_reserve_now(
-        connector_id, expiry_date, id_tag, reservation_id, parent_id_tag
-    )
-    return {"status": status}
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    return {"status": await handler.send_reserve_now(connector_id, expiry_date, id_tag, reservation_id, parent_id_tag)}
 
 
-# ==================== 交易 API ====================
+# ==================== 交易 / 标签 API ====================
 
 @app.get("/api/transactions")
 async def api_list_transactions(limit: int = 50):
     async with async_session() as db:
         txs = await transaction_service.list_transactions(db, limit=limit)
-    return [
-        {
-            "transaction_id": tx.transaction_id,
-            "charge_point_id": tx.charge_point_id,
-            "connector_id": tx.connector_id,
-            "id_tag": tx.id_tag,
-            "start_timestamp": tx.start_timestamp.isoformat(),
-            "end_timestamp": tx.end_timestamp.isoformat() if tx.end_timestamp else None,
-            "meter_start": tx.meter_start,
-            "meter_stop": tx.meter_stop,
-            "stop_reason": tx.stop_reason,
-        }
-        for tx in txs
-    ]
+    return [{"transaction_id": tx.transaction_id, "charge_point_id": tx.charge_point_id, "connector_id": tx.connector_id,
+             "id_tag": tx.id_tag, "start_timestamp": tx.start_timestamp.isoformat(),
+             "end_timestamp": tx.end_timestamp.isoformat() if tx.end_timestamp else None,
+             "meter_start": tx.meter_start, "meter_stop": tx.meter_stop, "stop_reason": tx.stop_reason} for tx in txs]
 
-
-# ==================== 标签 API ====================
 
 @app.get("/api/tags")
 async def api_list_tags():
     async with async_session() as db:
         tags = await auth_service.list_tags(db)
-    return [
-        {
-            "id_tag": tag.id_tag,
-            "parent_id_tag": tag.parent_id_tag,
-            "expiry_date": tag.expiry_date.isoformat() if tag.expiry_date else None,
-            "blocked": tag.blocked,
-        }
-        for tag in tags
-    ]
+    return [{"id_tag": tag.id_tag, "parent_id_tag": tag.parent_id_tag,
+             "expiry_date": tag.expiry_date.isoformat() if tag.expiry_date else None, "blocked": tag.blocked} for tag in tags]
 
 
 @app.post("/api/tags")
@@ -334,8 +215,7 @@ async def api_delete_tag(id_tag: str):
     async with async_session() as db:
         ok = await auth_service.delete_tag(db, id_tag)
         await db.commit()
-    if not ok:
-        raise HTTPException(status_code=404, detail="Tag not found")
+    if not ok: raise HTTPException(status_code=404, detail="Tag not found")
     return {"deleted": True}
 
 
@@ -351,30 +231,14 @@ async def api_block_tag(id_tag: str, blocked: bool = True):
 
 @app.get("/api/messages")
 async def api_messages(offset: int = 0, limit: int = 10):
-    """分页获取历史报文"""
     page = get_history_page(offset=offset, limit=limit)
-    return {
-        "messages": [
-            {
-                "seq": m.seq,
-                "charge_box_id": m.charge_box_id,
-                "direction": m.direction,
-                "action": m.action,
-                "payload": m.payload,
-                "timestamp": m.timestamp,
-                "msg_type": m.msg_type,
-            }
-            for m in page["messages"]
-        ],
-        "total": page["total"],
-        "has_newer": page["has_newer"],
-        "has_older": page["has_older"],
-    }
+    return {"messages": [{"seq": m.seq, "charge_box_id": m.charge_box_id, "direction": m.direction,
+             "action": m.action, "payload": m.payload, "timestamp": m.timestamp, "msg_type": m.msg_type}
+            for m in page["messages"]], "total": page["total"], "has_newer": page["has_newer"], "has_older": page["has_older"]}
 
 
 @app.delete("/api/messages")
 async def api_clear_messages():
-    """清除所有报文历史"""
     from ocpp_server.message_bus import clear_history
     clear_history()
     return {"cleared": True}
@@ -382,10 +246,8 @@ async def api_clear_messages():
 
 @app.delete("/api/transactions")
 async def api_clear_transactions():
-    """清除所有交易记录"""
-    from models.schema import Transaction, MeterValue
+    from sqlalchemy import delete
     async with async_session() as db:
-        from sqlalchemy import delete
         await db.execute(delete(MeterValue))
         await db.execute(delete(Transaction))
         await db.commit()
@@ -394,10 +256,8 @@ async def api_clear_transactions():
 
 @app.delete("/api/charge-points")
 async def api_clear_charge_points():
-    """清除所有充电桩记录"""
-    from models.schema import ChargePoint, Connector, Transaction, MeterValue
+    from sqlalchemy import delete
     async with async_session() as db:
-        from sqlalchemy import delete
         await db.execute(delete(MeterValue))
         await db.execute(delete(Transaction))
         await db.execute(delete(Connector))
@@ -416,87 +276,40 @@ async def api_get_handler_config():
 @app.post("/api/handler-config/{action}")
 async def api_set_handler_config(action: str, status: str = None, behavior: str = None, delay: int = 0, interval: int = None):
     config = {}
-    if status is not None:
-        config["status"] = status
-    if behavior is not None:
-        config["behavior"] = behavior
-        config["delay"] = delay
-    if interval is not None:
-        config["interval"] = interval
+    if status is not None: config["status"] = status
+    if behavior is not None: config["behavior"] = behavior; config["delay"] = delay
+    if interval is not None: config["interval"] = interval
     handler_config.set_config(action, config)
     return handler_config.get_all_configs()
 
 
 # ==================== 更新检测 API ====================
 
-import json
-import shutil
-import tempfile
-import zipfile
-import httpx
-from pathlib import Path
-from packaging.version import Version
-
-REPO = "littlejazzcat/OCPP1.6_Server"
-_current_version = None
-_latest_info = None
-_download_path = None
-_download_progress = 0
-
-
-def _get_version() -> str:
-    return VERSION
-
-
 @app.get("/api/check-update")
-async def api_check_update():
+async def api_check_update(source: str = "github"):
     global _current_version, _latest_info, _download_path
-    current = _get_version()
+    current = VERSION
     _current_version = current
     _download_path = Path(tempfile.gettempdir()) / f"ocpp_update_{current}.zip"
-
+    selected = next((s for s in SOURCES if s["name"].lower() == source.lower()), SOURCES[0])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                f"https://api.github.com/repos/{REPO}/releases/latest",
-                headers={"Accept": "application/vnd.github+json"},
-            )
+            resp = await client.get(selected["api"], headers=selected.get("headers", {}))
             if resp.status_code != 200:
-                return {"current": current, "latest": None, "update_available": False, "error": "API unavailable"}
-
+                return {"current": current, "latest": None, "update_available": False, "error": f"{selected['name']} API unavailable", "source": selected["name"]}
             data = resp.json()
             latest_tag = data["tag_name"]
-            body = data.get("body", "")
-            html_url = data["html_url"]
-
-            # 找 zip asset
-            asset_url = None
-            for asset in data.get("assets", []):
-                if asset["name"].endswith(".zip"):
-                    asset_url = asset["browser_download_url"]
-                    break
-
+            body, html_url = data.get("body", ""), data.get("html_url", "")
+            asset_url = next((a.get("browser_download_url", "") for a in data.get("assets", []) if a["name"].endswith(".zip")), None)
             try:
                 update_available = Version(latest_tag.lstrip("v")) > Version(current.lstrip("v"))
             except Exception:
                 update_available = latest_tag != current
-
-            _latest_info = {
-                "tag": latest_tag,
-                "body": body,
-                "url": html_url,
-                "download_url": asset_url,
-            }
-
-            return {
-                "current": current,
-                "latest": latest_tag,
-                "update_available": update_available and asset_url is not None,
-                "body": body,
-                "url": html_url,
-            }
+            _latest_info = {"tag": latest_tag, "body": body, "url": html_url, "download_url": asset_url, "source": selected["name"]}
+            return {"current": current, "latest": latest_tag, "update_available": update_available and asset_url is not None,
+                    "body": body, "url": html_url, "source": selected["name"]}
     except Exception as e:
-        return {"current": current, "latest": None, "update_available": False, "error": str(e)}
+        return {"current": current, "latest": None, "update_available": False, "error": str(e), "source": selected["name"]}
 
 
 @app.post("/api/do-update")
@@ -504,7 +317,6 @@ async def api_do_update():
     global _latest_info, _download_path, _download_progress
     if not _latest_info or not _latest_info["download_url"]:
         return {"ok": False, "error": "No update info available"}
-
     try:
         async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
             async with client.stream("GET", _latest_info["download_url"]) as resp:
@@ -532,21 +344,23 @@ async def api_download_progress():
 
 @app.post("/api/apply-update")
 async def api_apply_update():
-    global _download_path, _latest_info
+    global _download_path
     if not _download_path or not _download_path.exists():
         return {"ok": False, "error": "No download available"}
-
     try:
         dist_root = Path(__file__).parent.parent / "dist"
         dist_new = Path(__file__).parent.parent / "dist_new"
-
-        # 解压
         if dist_new.exists():
             shutil.rmtree(dist_new, ignore_errors=True)
         with zipfile.ZipFile(_download_path, 'r') as zf:
             zf.extractall(dist_new)
-
-        # 生成 update.bat
+        # 找到 ocppv16_server 目录
+        extracted_dir = dist_new
+        for item in dist_new.iterdir():
+            if item.is_dir() and 'ocppv16_server' in item.name:
+                extracted_dir = item
+                break
+        target_dir = dist_root / 'ocppv16_server'
         exe_name = "ocpp_server.exe"
         bat = dist_new / "update.bat"
         bat.write_text(f"""@echo off
@@ -555,17 +369,14 @@ title Updating OCPP Server...
 timeout /t 2 /nobreak >nul
 taskkill /f /im {exe_name} >nul 2>&1
 timeout /t 1 /nobreak >nul
-xcopy /e /y "{dist_new}\\*" "{dist_root}\\" >nul
+xcopy /e /y "{extracted_dir}\\*" "{target_dir}\\" >nul
 rmdir /s /q "{dist_new}" >nul
 del "{_download_path}" >nul 2>&1
-start "" "{dist_root / 'ocppv16_server' / exe_name}"
+start "" "{target_dir / exe_name}"
 del "%~f0" >nul 2>&1
 """)
-
-        # 启动 update.bat
         import subprocess
         subprocess.Popen(str(bat), shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0)
-
         return {"ok": True, "message": "Update started"}
     except Exception as e:
         return {"ok": False, "error": str(e)}

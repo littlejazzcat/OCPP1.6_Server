@@ -37,20 +37,27 @@ logger = logging.getLogger("main")
 
 
 async def _check_update_on_startup():
-    """启动时后台静默检测更新"""
+    """启动时后台静默检测更新（GitHub → Gitee 依次尝试）"""
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://api.github.com/repos/littlejazzcat/OCPP1.6_Server/releases/latest",
-                headers={"Accept": "application/vnd.github+json"},
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                latest = data["tag_name"]
-                if latest != VERSION:
-                    logger.info(f"New release available: {latest} (current: {VERSION})")
-                    logger.info(f"Download: {data['html_url']}")
+        from config import VERSION
+        sources = [
+            ("GitHub", "https://api.github.com/repos/littlejazzcat/OCPP1.6_Server/releases/latest",
+             {"Accept": "application/vnd.github+json"}),
+            ("Gitee", "https://gitee.com/api/v5/repos/littlejazzcat/OCPP1.6_Server/releases/latest", {}),
+        ]
+        for name, url, headers in sources:
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        latest = data["tag_name"]
+                        if latest != VERSION:
+                            logger.info(f"[{name}] New release: {latest} (current: {VERSION})")
+                        return
+            except Exception:
+                continue
     except Exception:
         pass
 

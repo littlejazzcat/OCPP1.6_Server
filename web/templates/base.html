@@ -16,18 +16,19 @@
       <a href="/tags">标签管理</a>
       <a href="/operations">远程操作</a>
       <a href="/docs" target="_blank">API 文档</a>
-      <a href="#" onclick="checkUpdate()" style="color:#ffd54f;">🔄 检查更新</a>
+      <a href="#" onclick="checkUpdate('github')" style="color:#ffd54f;">🔄 GitHub</a>
+      <a href="#" onclick="checkUpdate('gitee')" style="color:#ff9800;">🔄 Gitee</a>
     </div>
   </nav>
   <main class="container">
     {% block content %}{% endblock %}
   </main>
 <script>
-async function checkUpdate() {
+async function checkUpdate(source) {
   const btn = event.target;
   btn.textContent = '⏳ 检查中...';
   try {
-    const resp = await fetch('/api/check-update');
+    const resp = await fetch(`/api/check-update?source=${source}`);
     const data = await resp.json();
     if (data.update_available) {
       if (confirm(`发现新版本 ${data.latest}\n当前: ${data.current}\n\n${data.body?.substring(0,200) || ''}\n\n是否下载更新？`)) {
@@ -61,7 +62,7 @@ async function checkUpdate() {
         btn.textContent = '🔄 检查更新';
       }
     } else if (data.latest) {
-      alert(`已是最新版本 ${data.current} ✓`);
+      alert(`已是最新版本 ${data.current} ✓ (${data.source || ''})`);
       btn.textContent = '🔄 检查更新';
     } else {
       alert('无法连接更新服务器');
