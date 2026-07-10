@@ -16,10 +16,56 @@
       <a href="/tags">标签管理</a>
       <a href="/operations">远程操作</a>
       <a href="/docs" target="_blank">API 文档</a>
+      <a href="#" onclick="checkUpdate()" style="color:#ffd54f;">🔄 检查更新</a>
     </div>
   </nav>
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+<script>
+async function checkUpdate() {
+  const btn = event.target;
+  btn.textContent = '⏳ 检查中...';
+  try {
+    const resp = await fetch('/api/check-update');
+    const data = await resp.json();
+    if (data.update_available) {
+      if (confirm(`发现新版本 ${data.latest}\n当前: ${data.current}\n\n${data.body?.substring(0,200) || ''}\n\n是否下载更新？`)) {
+        btn.textContent = '⏳ 下载中...';
+        const dl = await fetch('/api/do-update', {method:'POST'});
+        const dlData = await dl.json();
+        if (dlData.ok) {
+          if (confirm('下载完成，是否立即安装更新？\n（程序将自动重启）')) {
+            btn.textContent = '⏳ 安装中...';
+            const apply = await fetch('/api/apply-update', {method:'POST'});
+            const applyData = await apply.json();
+            if (applyData.ok) {
+              setTimeout(() => location.reload(), 3000);
+            } else {
+              alert('安装失败: ' + applyData.error);
+            }
+          } else {
+            btn.textContent = '✅ 已下载，下次启动安装';
+          }
+        } else {
+          alert('下载失败: ' + dlData.error);
+          btn.textContent = '🔄 检查更新';
+        }
+      } else {
+        btn.textContent = '🔄 检查更新';
+      }
+    } else if (data.latest) {
+      alert(`已是最新版本 ${data.current} ✓`);
+      btn.textContent = '🔄 检查更新';
+    } else {
+      alert('无法连接更新服务器');
+      btn.textContent = '🔄 检查更新';
+    }
+  } catch(e) {
+    alert('检查更新失败: ' + e.message);
+    btn.textContent = '🔄 检查更新';
+  }
+}
+</script>
 </body>
 </html>

@@ -38,6 +38,26 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 
+async def _check_update_on_startup():
+    """启动时后台静默检测更新"""
+    try:
+        import httpx
+        from config import VERSION
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.github.com/repos/littlejazzcat/OCPP1.6_Server/releases/latest",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                latest = data["tag_name"]
+                if latest != VERSION:
+                    logger.info(f"New release available: {latest} (current: {VERSION})")
+                    logger.info(f"Download: {data['html_url']}")
+    except Exception:
+        pass
+
+
 async def main():
     logger.info("=" * 50)
     logger.info("OCPP 1.6 CSMS Server starting...")
@@ -49,6 +69,9 @@ async def main():
     # 初始化数据库
     await init_db()
     logger.info("Database initialized ✓")
+
+    # 后台检测更新
+    asyncio.create_task(_check_update_on_startup())
 
     # 启动 WebSocket 服务器（后台任务）
     ws_task = asyncio.create_task(start_ws_server())

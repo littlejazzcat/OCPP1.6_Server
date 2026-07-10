@@ -2,6 +2,9 @@
 
 from pydantic_settings import BaseSettings
 
+# 当前版本号（发布时手动更新）
+VERSION = "v1.0.0"
+
 
 class Settings(BaseSettings):
     # WebSocket Server（充电桩连接）

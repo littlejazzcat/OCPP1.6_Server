@@ -8,3 +8,5 @@ sqlalchemy[asyncio]>=2.0
 aiosqlite
 pydantic>=2.0
 pydantic-settings>=2.0
+httpx
+packaging

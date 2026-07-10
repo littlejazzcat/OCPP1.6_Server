@@ -1,4 +1,4 @@
-# OCPP 1.6 CSMS 使用说明
+﻿# 离线OCPP 1.6 CSMS 使用说明
 
 ## 简介
 
@@ -15,8 +15,8 @@ python main.py
 ```
 
 ### 打包版启动
-
-双击 `dist/ocppv16_server/ocpp_server.exe`。
+下载release中的压缩包解压
+双击 `ocppv16_server/ocpp_server.exe`。
 
 ## 访问
 
@@ -96,10 +96,4 @@ python tests/test_simulator.py --auto --count 5
 
 主要命令：`start` 开始充电、`stop` 停止、`status` 状态、`meter` 上报电表、`fault` 模拟故障、`quit` 退出。
 
-## 重新打包
 
-```powershell
-build.bat
-```
-
-输出在 `dist/ocppv16_server/`。

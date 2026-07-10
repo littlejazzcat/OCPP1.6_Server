@@ -12,6 +12,7 @@ from services import cp_service, auth_service, transaction_service
 from ocpp_server.server import get_connection, get_online_charge_points
 from ocpp_server.message_bus import get_history_page
 from ocpp_server import handler_config
+from config import VERSION
 
 
 # ==================== 充电桩 API ====================
@@ -424,3 +425,133 @@ async def api_set_handler_config(action: str, status: str = None, behavior: str 
         config["interval"] = interval
     handler_config.set_config(action, config)
     return handler_config.get_all_configs()
+
+
+# ==================== 更新检测 API ====================
+
+import json
+import shutil
+import tempfile
+import zipfile
+import httpx
+from pathlib import Path
+from packaging.version import Version
+
+REPO = "littlejazzcat/OCPP1.6_Server"
+_current_version = None
+_latest_info = None
+_download_path = None
+
+
+def _get_version() -> str:
+    return VERSION
+
+
+@app.get("/api/check-update")
+async def api_check_update():
+    global _current_version, _latest_info, _download_path
+    current = _get_version()
+    _current_version = current
+    _download_path = Path(tempfile.gettempdir()) / f"ocpp_update_{current}.zip"
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{REPO}/releases/latest",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            if resp.status_code != 200:
+                return {"current": current, "latest": None, "update_available": False, "error": "API unavailable"}
+
+            data = resp.json()
+            latest_tag = data["tag_name"]
+            body = data.get("body", "")
+            html_url = data["html_url"]
+
+            # 找 zip asset
+            asset_url = None
+            for asset in data.get("assets", []):
+                if asset["name"].endswith(".zip"):
+                    asset_url = asset["browser_download_url"]
+                    break
+
+            try:
+                update_available = Version(latest_tag.lstrip("v")) > Version(current.lstrip("v"))
+            except Exception:
+                update_available = latest_tag != current
+
+            _latest_info = {
+                "tag": latest_tag,
+                "body": body,
+                "url": html_url,
+                "download_url": asset_url,
+            }
+
+            return {
+                "current": current,
+                "latest": latest_tag,
+                "update_available": update_available and asset_url is not None,
+                "body": body,
+                "url": html_url,
+            }
+    except Exception as e:
+        return {"current": current, "latest": None, "update_available": False, "error": str(e)}
+
+
+@app.post("/api/do-update")
+async def api_do_update():
+    global _latest_info, _download_path
+    if not _latest_info or not _latest_info["download_url"]:
+        return {"ok": False, "error": "No update info available"}
+
+    try:
+        async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+            resp = await client.get(_latest_info["download_url"])
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"Download failed: HTTP {resp.status_code}"}
+            _download_path.write_bytes(resp.content)
+
+        return {"ok": True, "message": "Download complete"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/apply-update")
+async def api_apply_update():
+    global _download_path, _latest_info
+    if not _download_path or not _download_path.exists():
+        return {"ok": False, "error": "No download available"}
+
+    try:
+        dist_root = Path(__file__).parent.parent / "dist"
+        dist_new = Path(__file__).parent.parent / "dist_new"
+
+        # 解压
+        if dist_new.exists():
+            shutil.rmtree(dist_new, ignore_errors=True)
+        with zipfile.ZipFile(_download_path, 'r') as zf:
+            zf.extractall(dist_new)
+
+        # 生成 update.bat
+        exe_name = "ocpp_server.exe"
+        bat = dist_new / "update.bat"
+        bat.write_text(f"""@echo off
+chcp 65001 >nul
+title Updating OCPP Server...
+timeout /t 2 /nobreak >nul
+taskkill /f /im {exe_name} >nul 2>&1
+timeout /t 1 /nobreak >nul
+xcopy /e /y "{dist_new}\\*" "{dist_root}\\" >nul
+rmdir /s /q "{dist_new}" >nul
+del "{_download_path}" >nul 2>&1
+start "" "{dist_root / 'ocppv16_server' / exe_name}"
+del "%~f0" >nul 2>&1
+""")
+
+        # 启动 update.bat
+        import subprocess
+        subprocess.Popen(str(bat), shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0)
+
+        return {"ok": True, "message": "Update started"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
