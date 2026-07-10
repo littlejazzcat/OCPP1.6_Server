@@ -883,7 +883,8 @@ function filterCommands() {
 
 function saveKeepalive() {
   const val = document.getElementById("keepalive-interval").value;
-  sendCmd('change-config', {key:'HeartbeatInterval', value:val});
+  fetch(`/api/charge-points/${CP_ID}/change-config?key=HeartbeatInterval&value=${val}`, {method:'POST'})
+    .then(r => r.json()).then(d => alert('Saved: ' + JSON.stringify(d)));
 }
 
 // ========== 连接状态实时更新 ==========
