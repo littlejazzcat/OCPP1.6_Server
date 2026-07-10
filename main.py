@@ -10,26 +10,24 @@
 """
 
 import sys
+import asyncio
+import logging
 
 # Windows 控制台 UTF-8 编码
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-import asyncio
-import logging
-
 import uvicorn
 
-from config import settings
+from config import settings, VERSION
 from models.database import init_db
 from web.app import app
-from web.routes import *  # noqa: 注册页面路由
-from web.api import *     # noqa: 注册 API
-from web.sse import *     # noqa: 注册 SSE
+from web.routes import *  # noqa
+from web.api import *     # noqa
+from web.sse import *     # noqa
 from ocpp_server.server import start_ws_server
 
-# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -42,7 +40,6 @@ async def _check_update_on_startup():
     """启动时后台静默检测更新"""
     try:
         import httpx
-        from config import VERSION
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 "https://api.github.com/repos/littlejazzcat/OCPP1.6_Server/releases/latest",
@@ -60,21 +57,25 @@ async def _check_update_on_startup():
 
 async def main():
     logger.info("=" * 50)
-    logger.info("OCPP 1.6 CSMS Server starting...")
+    logger.info(f"OCPP 1.6 CSMS Server v{VERSION}")
     logger.info(f"  WebSocket: {settings.ws_host}:{settings.ws_port}")
     logger.info(f"  Web UI:    http://{settings.web_host}:{settings.web_port}")
     logger.info(f"  API Docs:  http://localhost:{settings.web_port}/docs")
     logger.info("=" * 50)
 
-    # 初始化数据库
     await init_db()
     logger.info("Database initialized ✓")
 
     # 后台检测更新
     asyncio.create_task(_check_update_on_startup())
 
-    # 启动 WebSocket 服务器（后台任务）
-    ws_task = asyncio.create_task(start_ws_server())
+    # 启动 WebSocket 服务器
+    async def _ws_with_log():
+        try:
+            await start_ws_server()
+        except Exception as e:
+            logger.error(f"WebSocket server failed: {e}", exc_info=True)
+    ws_task = asyncio.create_task(_ws_with_log())
 
     # 启动 FastAPI Web 服务器
     config = uvicorn.Config(
