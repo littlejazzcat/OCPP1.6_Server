@@ -441,6 +441,7 @@ REPO = "littlejazzcat/OCPP1.6_Server"
 _current_version = None
 _latest_info = None
 _download_path = None
+_download_progress = 0
 
 
 def _get_version() -> str:
@@ -500,20 +501,33 @@ async def api_check_update():
 
 @app.post("/api/do-update")
 async def api_do_update():
-    global _latest_info, _download_path
+    global _latest_info, _download_path, _download_progress
     if not _latest_info or not _latest_info["download_url"]:
         return {"ok": False, "error": "No update info available"}
 
     try:
         async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
-            resp = await client.get(_latest_info["download_url"])
-            if resp.status_code != 200:
-                return {"ok": False, "error": f"Download failed: HTTP {resp.status_code}"}
-            _download_path.write_bytes(resp.content)
-
+            async with client.stream("GET", _latest_info["download_url"]) as resp:
+                if resp.status_code != 200:
+                    return {"ok": False, "error": f"Download failed: HTTP {resp.status_code}"}
+                total = int(resp.headers.get("content-length", 0))
+                downloaded = 0
+                with open(_download_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            _download_progress = int(downloaded / total * 100)
+                _download_progress = 100
         return {"ok": True, "message": "Download complete"}
     except Exception as e:
+        _download_progress = 0
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/download-progress")
+async def api_download_progress():
+    return {"progress": _download_progress}
 
 
 @app.post("/api/apply-update")

@@ -108,7 +108,7 @@ class ChargePointHandler(BaseChargePoint):
     @on(Action.authorize)
     async def on_authorize(self, id_tag: str):
         logger.info(f"[{self.id}] Authorize: id_tag={id_tag}")
-        publish(OcppMessage(charge_box_id=self.id, direction="IN", action="Authorize (CALL)", payload={"id_tag": id_tag}))
+        publish(OcppMessage(charge_box_id=self.id, direction="IN", action="Authorize (CALL)", payload={"id_tag": id_tag, **kwargs}))
         cfg = handler_config.get_config("authorize")
         if cfg:
             if cfg.behavior == "Delay" and cfg.delay > 0:
@@ -127,7 +127,7 @@ class ChargePointHandler(BaseChargePoint):
     async def on_start_transaction(self, connector_id: int, id_tag: str, meter_start: int, timestamp: str, **kwargs):
         logger.info(f"[{self.id}] StartTransaction: connector={connector_id}, id_tag={id_tag}, meter_start={meter_start}")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="StartTransaction (CALL)",
-                            payload={"connector_id": connector_id, "id_tag": id_tag, "meter_start": meter_start}))
+                            payload={"connector_id": connector_id, "id_tag": id_tag, "meter_start": meter_start, "timestamp": timestamp, **kwargs}))
         cfg = handler_config.get_config("start_tx")
         auth_status = AuthorizationStatus.accepted
         if cfg:
@@ -156,7 +156,7 @@ class ChargePointHandler(BaseChargePoint):
         reason = kwargs.get("reason", "Local")
         logger.info(f"[{self.id}] StopTransaction: tx={transaction_id}, meter_stop={meter_stop}, reason={reason}")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="StopTransaction (CALL)",
-                            payload={"transaction_id": transaction_id, "meter_stop": meter_stop, "reason": reason}))
+                            payload={"transaction_id": transaction_id, "meter_stop": meter_stop, "reason": reason, "timestamp": timestamp, **kwargs}))
         cfg = handler_config.get_config("stop_tx")
         if cfg:
             if cfg.behavior == "Delay" and cfg.delay > 0:
@@ -189,7 +189,7 @@ class ChargePointHandler(BaseChargePoint):
     async def on_status_notification(self, connector_id: int, error_code: str, status: str, **kwargs):
         logger.info(f"[{self.id}] StatusNotification: connector={connector_id}, status={status}, error={error_code}")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="StatusNotification (CALL)",
-                            payload={"connector_id": connector_id, "status": status, "error_code": error_code}))
+                            payload={"connector_id": connector_id, "status": status, "error_code": error_code, **kwargs}))
         async with async_session() as db:
             if self._charge_point_db_id is None:
                 cp = await cp_service.get_by_charge_box_id(db, self.id)

@@ -31,26 +31,32 @@ async function checkUpdate() {
     const data = await resp.json();
     if (data.update_available) {
       if (confirm(`发现新版本 ${data.latest}\n当前: ${data.current}\n\n${data.body?.substring(0,200) || ''}\n\n是否下载更新？`)) {
-        btn.textContent = '⏳ 下载中...';
-        const dl = await fetch('/api/do-update', {method:'POST'});
-        const dlData = await dl.json();
-        if (dlData.ok) {
-          if (confirm('下载完成，是否立即安装更新？\n（程序将自动重启）')) {
-            btn.textContent = '⏳ 安装中...';
-            const apply = await fetch('/api/apply-update', {method:'POST'});
-            const applyData = await apply.json();
-            if (applyData.ok) {
-              setTimeout(() => location.reload(), 3000);
+        btn.textContent = '⏳ 下载中 0%';
+        fetch('/api/do-update', {method:'POST'});
+        const poll = setInterval(async () => {
+          try {
+            const pr = await fetch('/api/download-progress');
+            const pd = await pr.json();
+            if (pd.progress >= 100) {
+              clearInterval(poll);
+              btn.textContent = '✅ 下载完成';
+              if (confirm('下载完成，是否立即安装更新？（程序将自动重启）')) {
+                btn.textContent = '⏳ 安装中...';
+                const apply = await fetch('/api/apply-update', {method:'POST'});
+                const applyData = await apply.json();
+                if (applyData.ok) {
+                  setTimeout(() => location.reload(), 3000);
+                } else {
+                  alert('安装失败: ' + applyData.error);
+                }
+              } else {
+                btn.textContent = '✅ 已下载，下次启动安装';
+              }
             } else {
-              alert('安装失败: ' + applyData.error);
+              btn.textContent = `⏳ 下载中 ${pd.progress}%`;
             }
-          } else {
-            btn.textContent = '✅ 已下载，下次启动安装';
-          }
-        } else {
-          alert('下载失败: ' + dlData.error);
-          btn.textContent = '🔄 检查更新';
-        }
+          } catch(e) {}
+        }, 300);
       } else {
         btn.textContent = '🔄 检查更新';
       }

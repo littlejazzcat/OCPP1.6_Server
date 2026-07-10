@@ -3,7 +3,7 @@
 from pydantic_settings import BaseSettings
 
 # 当前版本号（发布时手动更新）
-VERSION = "v1.0.1"
+VERSION = "v1.0.2"
 
 
 class Settings(BaseSettings):
