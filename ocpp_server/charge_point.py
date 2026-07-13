@@ -318,6 +318,12 @@ class ChargePointHandler(BaseChargePoint):
 
     # ==================== 连接管理 ====================
 
+    async def send_raw(self, raw_data: str):
+        """原样下发自定义报文"""
+        logger.info(f"[{self.id}] Raw send: {raw_data[:200]}")
+        publish(OcppMessage(charge_box_id=self.id, direction="OUT", action="Raw Send", payload={"data": raw_data[:500]}))
+        await self._connection.send(raw_data)
+
     async def on_disconnect(self):
         logger.info(f"[{self.id}] Disconnected")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="断开连接", payload={}))

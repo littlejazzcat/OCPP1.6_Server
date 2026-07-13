@@ -182,6 +182,11 @@
       <button class="cmd-btn btn-danger" onclick="sendCmd('cancel-reservation')">✖ Cancel Reservation</button>
     </div>
 
+    <div class="cmd-group" data-group="custom">
+      <div class="cmd-group-title">Custom</div>
+      <button class="cmd-btn" onclick="sendCmd('raw-send')">✏ Raw Message</button>
+    </div>
+
     <!-- Handler 配置弹窗 -->
     <div id="handler-modal" class="cmd-modal" style="display:none;">
       <div class="cmd-modal-content" style="min-width:420px;">
@@ -649,6 +654,7 @@ function sendCmd(cmd, extraParams = {}) {
     'trigger': 'Trigger Message',
     'cancel-reservation': 'Cancel Reservation',
     'reserve-now': 'Reserve Now',
+    'raw-send': 'Raw Message',
   };
   document.getElementById("cmd-modal-title").textContent = titleMap[cmd] || cmd;
 
@@ -734,6 +740,8 @@ function sendCmd(cmd, extraParams = {}) {
                 <label>ID Tag:</label><input id="modal-rn-idtag" value="TEST001" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
                 <label>Reservation ID (optional):</label><input id="modal-rn-rid" type="number" placeholder="auto-generated if empty" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
                 <label>Parent ID Tag (optional):</label><input id="modal-rn-pidtag" placeholder="group account" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'raw-send') {
+    bodyHtml = `<label>Raw OCPP Message (JSON):</label><textarea id="modal-raw-data" placeholder='[2,"msgId","BootNotification",{"chargePointVendor":"Test","chargePointModel":"Test"}]' style="width:100%;height:150px;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;"></textarea>`;
   } else {
     bodyHtml = `<p style="color:#888;">Send <strong>${cmd}</strong> to charge point?</p>`;
   }
@@ -845,6 +853,11 @@ document.getElementById("cmd-modal-send").addEventListener("click", async () => 
     if (rnRid) params.push(`reservation_id=${rnRid}`);
     const rnPid = document.getElementById("modal-rn-pidtag")?.value;
     if (rnPid) params.push(`parent_id_tag=${encodeURIComponent(rnPid)}`);
+  }
+  if (cmd === 'raw-send') {
+    const rawData = document.getElementById("modal-raw-data")?.value || '';
+    if (!rawData) { alert('Please enter a message'); return; }
+    params.push(`data=${encodeURIComponent(rawData)}`);
   }
 
   closeModal();  // 立即关闭弹窗，不等待桩回复

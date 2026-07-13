@@ -182,6 +182,14 @@ async def api_reserve_now(charge_box_id: str, connector_id: int, expiry_date: st
     return {"status": await handler.send_reserve_now(connector_id, expiry_date, id_tag, reservation_id, parent_id_tag)}
 
 
+@app.post("/api/charge-points/{charge_box_id}/raw-send")
+async def api_raw_send(charge_box_id: str, data: str):
+    handler = get_connection(charge_box_id)
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    await handler.send_raw(data)
+    return {"status": "sent"}
+
+
 # ==================== 交易 / 标签 API ====================
 
 @app.get("/api/transactions")
