@@ -31,7 +31,7 @@ class ChargePointHandler(BaseChargePoint):
     """处理单个充电桩的 OCPP 消息"""
 
     def __init__(self, charge_box_id: str, connection):
-        super().__init__(charge_box_id, connection)
+        super().__init__(charge_box_id, connection, response_timeout=10)
         self._charge_point_db_id: int | None = None
         self._pending_actions: dict[str, str] = {}
 
@@ -176,8 +176,7 @@ class ChargePointHandler(BaseChargePoint):
     async def on_meter_values(self, connector_id: int, meter_value: list, **kwargs):
         transaction_id = kwargs.get("transaction_id")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="MeterValues (CALL)",
-                            payload={"connector_id": connector_id, "transaction_id": transaction_id, "samples": len(meter_value),
-                                      "values": [{sv.get("measurand", "?"): sv.get("value", "?") for sv in s.get("sampledValue", [])} for s in meter_value]}))
+                            payload={"connector_id": connector_id, **kwargs, "meter_value": meter_value}))
         async with async_session() as db:
             for sample in meter_value:
                 await transaction_service.add_meter_value(db=db, transaction_id=transaction_id or 0,
@@ -189,7 +188,7 @@ class ChargePointHandler(BaseChargePoint):
     async def on_status_notification(self, connector_id: int, error_code: str, status: str, **kwargs):
         logger.info(f"[{self.id}] StatusNotification: connector={connector_id}, status={status}, error={error_code}")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="StatusNotification (CALL)",
-                            payload={"connector_id": connector_id, "status": status, "error_code": error_code, **kwargs}))
+                            payload={"connector_id": connector_id, "error_code": error_code, "status": status, **kwargs}))
         async with async_session() as db:
             if self._charge_point_db_id is None:
                 cp = await cp_service.get_by_charge_box_id(db, self.id)

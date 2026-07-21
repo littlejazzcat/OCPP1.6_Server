@@ -23,12 +23,15 @@
     <button class="btn" onclick="sendOp('reset', {reset_type: 'Soft'})">软复位</button>
     <button class="btn btn-danger" onclick="sendOp('reset', {reset_type: 'Hard'})">硬复位</button>
     <button class="btn" onclick="sendOp('clear-cache')">清除缓存</button>
-    <button class="btn" onclick="sendOp('get-config')">读取配置</button>
   </div>
   <div class="ops-inline" style="margin-top:12px;">
     <input type="text" id="op_config_key" placeholder="配置键" style="width:150px;">
     <input type="text" id="op_config_value" placeholder="配置值" style="width:150px;">
     <button class="btn" onclick="sendOp('change-config', {key: document.getElementById('op_config_key').value, value: document.getElementById('op_config_value').value})">修改配置</button>
+  </div>
+  <div class="ops-inline" style="margin-top:8px;">
+    <input type="text" id="op_getconfig_key" placeholder="Key (可选,逗号分隔,留空=全部)" style="width:320px;">
+    <button class="btn" onclick="sendOp('get-config', {key: document.getElementById('op_getconfig_key').value})">读取配置</button>
   </div>
 
   <!-- 事务控制 -->

@@ -83,6 +83,21 @@ async def api_change_config(charge_box_id: str, key: str, value: str):
     return {"status": await handler.send_change_configuration(key, value)}
 
 
+@app.post("/api/charge-points/{charge_box_id}/get-config")
+async def api_get_config(charge_box_id: str, key: str = ""):
+    handler = get_connection(charge_box_id)
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    keys = [k.strip() for k in key.split(",") if k.strip()] if key else None
+    try:
+        result = await handler.send_get_configuration(keys)
+    except Exception as e:
+        raise HTTPException(status_code=504, detail=f"GetConfiguration failed: {e}")
+    return {
+        "configuration_key": result.configuration_key,
+        "unknown_key": result.unknown_key,
+    }
+
+
 @app.post("/api/charge-points/{charge_box_id}/clear-cache")
 async def api_clear_cache(charge_box_id: str):
     handler = get_connection(charge_box_id)

@@ -15,6 +15,8 @@ import logging
 
 # Windows 控制台 UTF-8 编码
 if sys.platform == "win32":
+    # Win7 兼容：强制 SelectorEventLoop
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
@@ -83,6 +85,10 @@ async def main():
         except Exception as e:
             logger.error(f"WebSocket server failed: {e}", exc_info=True)
     ws_task = asyncio.create_task(_ws_with_log())
+
+    # 自动打开浏览器
+    import webbrowser
+    webbrowser.open(f"http://localhost:{settings.web_port}")
 
     # 启动 FastAPI Web 服务器
     config = uvicorn.Config(

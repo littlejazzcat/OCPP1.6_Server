@@ -672,6 +672,8 @@ function sendCmd(cmd, extraParams = {}) {
   } else if (cmd === 'change-config') {
     bodyHtml = `<label>Key:</label><input id="modal-config-key" placeholder="e.g. HeartbeatInterval" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
                 <label>Value:</label><input id="modal-config-val" placeholder="e.g. 120" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
+  } else if (cmd === 'get-config') {
+    bodyHtml = `<label>Key Filter (optional, comma-separated, empty=all):</label><input id="modal-getconfig-key" placeholder="e.g. HeartbeatInterval,LightIntensity" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">`;
   } else if (cmd === 'update-firmware') {
     const now = new Date().toISOString().slice(0, 16);
     bodyHtml = `<label>Location (URL):</label><input id="modal-fw-url" placeholder="https://example.com/firmware.bin" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
@@ -784,6 +786,10 @@ document.getElementById("cmd-modal-send").addEventListener("click", async () => 
   if (cmd === 'change-config') {
     params.push(`key=${encodeURIComponent(document.getElementById("modal-config-key")?.value || '')}`);
     params.push(`value=${encodeURIComponent(document.getElementById("modal-config-val")?.value || '')}`);
+  }
+  if (cmd === 'get-config') {
+    const gck = document.getElementById("modal-getconfig-key")?.value || '';
+    if (gck) params.push(`key=${encodeURIComponent(gck)}`);
   }
   if (cmd === 'update-firmware') {
     const fwLocation = document.getElementById("modal-fw-url")?.value?.trim() || '';
