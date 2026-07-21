@@ -237,8 +237,9 @@ class ChargePointHandler(BaseChargePoint):
         resp: call_result.ChangeConfiguration = await self.call(call.ChangeConfiguration(key=key, value=value))
         return resp.status
 
-    async def send_get_configuration(self, key: list[str] = None) -> call_result.GetConfiguration:
-        return await self.call(call.GetConfiguration(key=key or []))
+    async def send_get_configuration(self, key: list[str] = None):
+        kwargs = {"key": key} if key else {}
+        return await self.call(call.GetConfiguration(**kwargs))
 
     async def send_clear_cache(self) -> str:
         resp: call_result.ClearCache = await self.call(call.ClearCache())
