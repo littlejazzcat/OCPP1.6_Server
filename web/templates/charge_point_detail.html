@@ -628,7 +628,24 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   });
 });
 
-renderHandlers();
+// 页面加载时先读取后端最新配置，再渲染
+fetch('/api/handler-config')
+  .then(r => r.json())
+  .then(config => {
+    for (const [action, cfg] of Object.entries(config)) {
+      const h = handlers.find(h => h.action === action);
+      if (h && h.configurable) {
+        h.status = cfg.status || h.status;
+        h.behavior = cfg.behavior || h.behavior;
+        h.delay = cfg.delay || h.delay;
+        if (h.action === 'boot' && cfg.interval) {
+          h.interval = cfg.interval;
+          h.extra = `interval: ${cfg.interval}`;
+        }
+      }
+    }
+  })
+  .finally(() => renderHandlers());
 
 // ========== 命令发送 ==========
 let pendingCmd = null;
