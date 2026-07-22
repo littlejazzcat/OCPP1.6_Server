@@ -82,15 +82,26 @@ async def add_meter_value(
 async def list_transactions(
     db: AsyncSession,
     limit: int = 50,
+    offset: int = 0,
     charge_point_id: int = None,
 ) -> list[Transaction]:
-    """查询交易列表"""
+    """查询交易列表（支持分页）"""
     stmt = select(Transaction).order_by(Transaction.start_timestamp.desc())
     if charge_point_id:
         stmt = stmt.where(Transaction.charge_point_id == charge_point_id)
-    stmt = stmt.limit(limit)
+    stmt = stmt.offset(offset).limit(limit)
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_transactions(db: AsyncSession, charge_point_id: int = None) -> int:
+    """统计交易总数"""
+    from sqlalchemy import func as sql_func
+    stmt = select(sql_func.count()).select_from(Transaction)
+    if charge_point_id:
+        stmt = stmt.where(Transaction.charge_point_id == charge_point_id)
+    result = await db.execute(stmt)
+    return result.scalar_one()
 
 
 async def get_by_transaction_id(db: AsyncSession, transaction_id: int) -> Transaction | None:

@@ -28,7 +28,7 @@ async def dashboard(request: Request):
     """仪表盘首页"""
     async with async_session() as db:
         cps = await cp_service.list_all(db)
-        txs = await transaction_service.list_transactions(db, limit=20)
+        txs = await transaction_service.list_transactions(db, limit=10)
 
     return render("dashboard.html", {
         "request": request,

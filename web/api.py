@@ -208,13 +208,19 @@ async def api_raw_send(charge_box_id: str, data: str):
 # ==================== 交易 / 标签 API ====================
 
 @app.get("/api/transactions")
-async def api_list_transactions(limit: int = 50):
+async def api_list_transactions(limit: int = 10, offset: int = 0):
     async with async_session() as db:
-        txs = await transaction_service.list_transactions(db, limit=limit)
-    return [{"transaction_id": tx.transaction_id, "charge_point_id": tx.charge_point_id, "connector_id": tx.connector_id,
-             "id_tag": tx.id_tag, "start_timestamp": tx.start_timestamp.isoformat(),
-             "end_timestamp": tx.end_timestamp.isoformat() if tx.end_timestamp else None,
-             "meter_start": tx.meter_start, "meter_stop": tx.meter_stop, "stop_reason": tx.stop_reason} for tx in txs]
+        txs = await transaction_service.list_transactions(db, limit=limit, offset=offset)
+        total = await transaction_service.count_transactions(db)
+    return {
+        "transactions": [{"transaction_id": tx.transaction_id, "charge_point_id": tx.charge_point_id,
+                         "connector_id": tx.connector_id, "id_tag": tx.id_tag,
+                         "start_timestamp": tx.start_timestamp.isoformat(),
+                         "end_timestamp": tx.end_timestamp.isoformat() if tx.end_timestamp else None,
+                         "meter_start": tx.meter_start, "meter_stop": tx.meter_stop, "stop_reason": tx.stop_reason}
+                        for tx in txs],
+        "total": total,
+    }
 
 
 @app.get("/api/tags")
