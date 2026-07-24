@@ -130,13 +130,25 @@ async def api_get_diagnostics(charge_box_id: str, location: str, retries: int = 
 @app.post("/api/charge-points/{charge_box_id}/set-charging-profile")
 async def api_set_charging_profile(charge_box_id: str, connector_id: int, charging_profile_id: int, stack_level: int,
     charging_profile_purpose: str = "TxProfile", charging_profile_kind: str = "Absolute", charging_rate_unit: str = "A",
-    limit: float = 16.0, start_period: int = 0, duration: int = None, number_phases: int = None):
+    limit: float = 16.0, start_period: int = 0, start_schedule: str = None, duration: int = None, number_phases: int = None):
     handler = get_connection(charge_box_id)
     if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
     schedule_period = {"start_period": start_period, "limit": limit}
     if number_phases is not None: schedule_period["number_phases"] = number_phases
-    charging_schedule = {"charging_rate_unit": charging_rate_unit, "charging_schedule_period": [schedule_period]}
-    if duration is not None: charging_schedule["duration"] = duration
+    # datetime-local 输入格式: YYYY-MM-DDTHH:MM，补全为 ISO 8601
+    if start_schedule:
+        if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$', start_schedule):
+            start_schedule = start_schedule + ':00Z'
+        elif not start_schedule.endswith('Z'):
+            start_schedule = start_schedule + 'Z'
+    # OCPP 1.6 ChargingSchedule 字段顺序：duration → startSchedule → chargingRateUnit → chargingSchedulePeriod → minChargingRate
+    charging_schedule = {
+        "duration": duration,
+        "start_schedule": start_schedule or None,
+        "charging_rate_unit": charging_rate_unit,
+        "charging_schedule_period": [schedule_period],
+    }
+    charging_schedule = {k: v for k, v in charging_schedule.items() if v is not None}
     cs_charging_profiles = {"charging_profile_id": charging_profile_id, "stack_level": stack_level,
         "charging_profile_purpose": charging_profile_purpose, "charging_profile_kind": charging_profile_kind,
         "charging_schedule": charging_schedule}
