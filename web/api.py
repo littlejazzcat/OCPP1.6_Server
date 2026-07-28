@@ -130,7 +130,7 @@ async def api_get_diagnostics(charge_box_id: str, location: str, retries: int = 
 @app.post("/api/charge-points/{charge_box_id}/set-charging-profile")
 async def api_set_charging_profile(charge_box_id: str, connector_id: int, charging_profile_id: int, stack_level: int,
     charging_profile_purpose: str = "TxProfile", charging_profile_kind: str = "Absolute", charging_rate_unit: str = "A",
-    limit: float = 16.0, start_period: int = 0, start_schedule: str = None, duration: int = None, number_phases: int = None):
+    limit: float = 16.0, start_period: int = 0, transaction_id: int = None, start_schedule: str = None, duration: int = None, number_phases: int = None):
     handler = get_connection(charge_box_id)
     if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
     schedule_period = {"start_period": start_period, "limit": limit}
@@ -152,6 +152,10 @@ async def api_set_charging_profile(charge_box_id: str, connector_id: int, chargi
     cs_charging_profiles = {"charging_profile_id": charging_profile_id, "stack_level": stack_level,
         "charging_profile_purpose": charging_profile_purpose, "charging_profile_kind": charging_profile_kind,
         "charging_schedule": charging_schedule}
+    if transaction_id is not None:
+        cs_charging_profiles = {"charging_profile_id": charging_profile_id, "transaction_id": transaction_id,
+            "stack_level": stack_level, "charging_profile_purpose": charging_profile_purpose,
+            "charging_profile_kind": charging_profile_kind, "charging_schedule": charging_schedule}
     return {"status": await handler.send_set_charging_profile(connector_id, cs_charging_profiles)}
 
 

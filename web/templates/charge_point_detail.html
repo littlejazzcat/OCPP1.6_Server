@@ -249,7 +249,7 @@
     <div id="cmd-modal" class="cmd-modal" style="display:none;">
       <div class="cmd-modal-content">
         <div class="cmd-modal-title" id="cmd-modal-title"></div>
-        <div id="cmd-modal-body"></div>
+        <div id="cmd-modal-body" style="max-height:60vh;overflow-y:auto;"></div>
         <div class="cmd-modal-actions">
           <button class="btn btn-sm" onclick="closeModal()">Cancel</button>
           <button class="btn btn-sm btn-success" id="cmd-modal-send">Send</button>
@@ -706,6 +706,7 @@ function sendCmd(cmd, extraParams = {}) {
   } else if (cmd === 'set-charging-profile') {
     bodyHtml = `<label>Connector ID:</label><input id="modal-cp-connid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
                 <label>Charging Profile ID:</label><input id="modal-cp-profileid" type="number" value="1" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
+                <label>Transaction ID (optional):</label><input id="modal-cp-txid" type="number" placeholder="leave empty for all" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
                 <label>Stack Level:</label><input id="modal-cp-stack" type="number" value="0" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
                 <label>Purpose:</label><select id="modal-cp-purpose" style="width:100%;padding:8px;margin:4px 0;border:1px solid #ddd;border-radius:4px;">
                   <option value="ChargePointMaxProfile">ChargePointMaxProfile</option>
@@ -831,6 +832,8 @@ document.getElementById("cmd-modal-send").addEventListener("click", async () => 
   if (cmd === 'set-charging-profile') {
     params.push(`connector_id=${document.getElementById("modal-cp-connid")?.value || 1}`);
     params.push(`charging_profile_id=${document.getElementById("modal-cp-profileid")?.value || 1}`);
+    const cpTxId = document.getElementById("modal-cp-txid")?.value;
+    if (cpTxId) params.push(`transaction_id=${cpTxId}`);
     params.push(`stack_level=${document.getElementById("modal-cp-stack")?.value || 0}`);
     params.push(`charging_profile_purpose=${document.getElementById("modal-cp-purpose")?.value || 'TxDefaultProfile'}`);
     params.push(`charging_profile_kind=${document.getElementById("modal-cp-kind")?.value || 'Absolute'}`);
