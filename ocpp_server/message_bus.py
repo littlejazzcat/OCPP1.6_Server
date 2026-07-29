@@ -25,6 +25,10 @@ _message_queue: asyncio.Queue[OcppMessage] = asyncio.Queue(maxsize=500)
 _message_history: list[OcppMessage] = []
 _seq_counter: int = 0
 
+# 原始报文缓存（终端显示的完整 JSON 数组）
+_raw_history: list[dict] = []
+_raw_seq_counter: int = 0
+
 
 def publish(msg: OcppMessage):
     """发布一条报文（OCPP 层调用）"""
@@ -60,12 +64,39 @@ def get_history_page(offset: int = 0, limit: int = 10) -> dict:
 
 def clear_history():
     """清除所有历史消息"""
-    global _seq_counter
+    global _seq_counter, _raw_seq_counter
     _message_history.clear()
+    _raw_history.clear()
     _seq_counter = 0
+    _raw_seq_counter = 0
     # 同时清空队列
     while not _message_queue.empty():
         try:
             _message_queue.get_nowait()
         except asyncio.QueueEmpty:
             break
+
+
+def publish_raw(charge_box_id: str, direction: str, raw_json: str):
+    """存储原始报文（终端显示格式）"""
+    global _raw_seq_counter
+    _raw_seq_counter += 1
+    _raw_history.append({
+        "seq": _raw_seq_counter,
+        "charge_box_id": charge_box_id,
+        "direction": direction,
+        "raw": raw_json,
+        "timestamp": datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
+    })
+
+
+def get_raw_history() -> list[dict]:
+    """获取所有原始报文"""
+    return _raw_history
+
+
+def clear_raw_history():
+    """清除原始报文缓存"""
+    global _raw_seq_counter
+    _raw_history.clear()
+    _raw_seq_counter = 0

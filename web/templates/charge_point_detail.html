@@ -56,6 +56,7 @@
         <button class="btn btn-sm" id="pause-btn" onclick="togglePause()">⏸ 暂停</button>
         <button class="btn btn-sm" id="theme-btn" onclick="toggleLogTheme()">🌙 暗色</button>
         <button class="btn btn-sm" onclick="exportLog()" title="导出为文本">⬇ 导出</button>
+        <button class="btn btn-sm" onclick="exportRawLog()" title="导出原始 JSON 报文">📋 原始导出</button>
         <button class="btn btn-sm btn-danger" onclick="clearLog()" title="清除当前充电桩报文">🗑 清除</button>
       </div>
       <div id="message-log" class="log-container light">
@@ -405,6 +406,20 @@ function exportLog() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `ocpp_log_${CP_ID}_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+}
+
+async function exportRawLog() {
+  const resp = await fetch('/api/raw-messages');
+  const data = await resp.json();
+  const cpMsgs = data.messages.filter(m => m.charge_box_id === CP_ID);
+  const lines = cpMsgs.map(m =>
+    `${m.timestamp} [${m.charge_box_id}] ${m.direction === 'IN' ? '◀' : '▶'} ${m.raw}`
+  );
+  const blob = new Blob([lines.join('\n')], {type: 'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ocpp_raw_${CP_ID}_${new Date().toISOString().slice(0,10)}.txt`;
   a.click();
 }
 

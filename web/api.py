@@ -289,6 +289,20 @@ async def api_clear_messages():
     return {"cleared": True}
 
 
+@app.get("/api/raw-messages")
+async def api_raw_messages():
+    from ocpp_server.message_bus import get_raw_history
+    raw = get_raw_history()
+    return {"messages": raw, "total": len(raw)}
+
+
+@app.delete("/api/raw-messages")
+async def api_clear_raw_messages():
+    from ocpp_server.message_bus import clear_raw_history
+    clear_raw_history()
+    return {"cleared": True}
+
+
 @app.delete("/api/transactions")
 async def api_clear_transactions():
     from sqlalchemy import delete

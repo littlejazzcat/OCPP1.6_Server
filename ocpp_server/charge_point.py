@@ -21,7 +21,7 @@ from ocpp.v16.enums import (
 
 from models.database import async_session
 from services import cp_service, auth_service, transaction_service
-from .message_bus import publish, OcppMessage
+from .message_bus import publish, publish_raw, OcppMessage
 from . import handler_config
 
 logger = logging.getLogger("ocpp_server")
@@ -38,6 +38,8 @@ class ChargePointHandler(BaseChargePoint):
     async def route_message(self, raw_msg):
         """覆写 route_message，捕获所有入站消息（包括 CALLRESULT）"""
         msg = json.loads(raw_msg) if isinstance(raw_msg, str) else raw_msg
+        raw_str = raw_msg if isinstance(raw_msg, str) else json.dumps(raw_msg)
+        publish_raw(self.id, "IN", raw_str)
         msg_type, msg_id = msg[0], msg[1]
         if msg_type in (3, 4):
             action = self._pending_actions.pop(msg_id, None)
@@ -51,6 +53,7 @@ class ChargePointHandler(BaseChargePoint):
 
     async def _send(self, message):
         """覆写 _send，捕获所有发出的消息"""
+        publish_raw(self.id, "OUT", message)
         parsed = json.loads(message)
         msg_type, msg_id = parsed[0], parsed[1]
         action = parsed[2] if len(parsed) > 2 and isinstance(parsed[2], str) else None
