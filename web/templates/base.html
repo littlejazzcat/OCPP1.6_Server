@@ -24,6 +24,18 @@
     {% block content %}{% endblock %}
   </main>
 <script>
+// 更新完成提示（重启后首次加载弹出）
+fetch('/api/update-notice')
+  .then(r => r.json())
+  .then(d => {
+    if (d.updated) {
+      setTimeout(() => {
+        alert(`✅ 已更新到 ${d.version}，请刷新页面查看最新界面。`);
+      }, 800);
+    }
+  })
+  .catch(() => {});
+
 async function checkUpdate(source) {
   const btn = event.target;
   btn.textContent = '⏳ 检查中...';
@@ -33,7 +45,6 @@ async function checkUpdate(source) {
     if (data.update_available) {
       if (confirm(`发现新版本 ${data.latest}\n当前: ${data.current}\n\n${data.body?.substring(0,200) || ''}\n\n是否下载更新？`)) {
         btn.textContent = '⏳ 下载中 0%';
-        fetch('/api/do-update', {method:'POST'});
         const poll = setInterval(async () => {
           try {
             const pr = await fetch('/api/download-progress');
@@ -49,6 +60,7 @@ async function checkUpdate(source) {
                   setTimeout(() => location.reload(), 3000);
                 } else {
                   alert('安装失败: ' + applyData.error);
+                  btn.textContent = '🔄 检查更新';
                 }
               } else {
                 btn.textContent = '✅ 已下载，下次启动安装';
@@ -58,6 +70,15 @@ async function checkUpdate(source) {
             }
           } catch(e) {}
         }, 300);
+
+        // 等待下载请求返回，失败则停止轮询
+        const dlResp = await fetch('/api/do-update', {method:'POST'});
+        const dlData = await dlResp.json().catch(() => ({}));
+        if (!dlData.ok) {
+          clearInterval(poll);
+          alert('下载失败: ' + (dlData.error || '未知错误'));
+          btn.textContent = '🔄 检查更新';
+        }
       } else {
         btn.textContent = '🔄 检查更新';
       }

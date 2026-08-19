@@ -2,9 +2,12 @@
 
 import asyncio
 import json
+import logging
+import os
 import random
 import re
 import shutil
+import sys
 import tempfile
 import zipfile
 from datetime import datetime, timezone
@@ -36,6 +39,21 @@ _current_version = None
 _latest_info = None
 _download_path = None
 _download_progress = 0
+
+logger = logging.getLogger("web")
+
+# ---- 更新完成提示（重启后读取标记文件） ----
+UPDATE_NOTICE = None
+_update_flag = os.path.join(os.path.dirname(sys.executable), "updated_flag.txt")
+if os.path.exists(_update_flag):
+    try:
+        with open(_update_flag, "r", encoding="utf-8") as f:
+            UPDATE_NOTICE = f.read().strip()
+        os.remove(_update_flag)
+        if UPDATE_NOTICE:
+            logger.info(f"检测到更新完成标记: {UPDATE_NOTICE}")
+    except Exception:
+        UPDATE_NOTICE = None
 
 
 # ==================== 充电桩 API ====================
@@ -221,6 +239,14 @@ async def api_raw_send(charge_box_id: str, data: str):
     return {"status": "sent"}
 
 
+@app.post("/api/charge-points/{charge_box_id}/data-transfer")
+async def api_data_transfer(charge_box_id: str, vendor_id: str, message_id: str = None, data: str = None):
+    handler = get_connection(charge_box_id)
+    if handler is None: raise HTTPException(status_code=404, detail="Charge point not online")
+    result = await handler.send_data_transfer(vendor_id, message_id, data)
+    return {"status": result.status, "data": result.data}
+
+
 # ==================== 交易 / 标签 API ====================
 
 @app.get("/api/transactions")
@@ -344,6 +370,12 @@ async def api_set_handler_config(action: str, status: str = None, behavior: str 
 
 # ==================== 更新检测 API ====================
 
+@app.get("/api/update-notice")
+async def api_update_notice():
+    """更新完成提示（前端页面加载时轮询一次）"""
+    return {"updated": UPDATE_NOTICE is not None, "version": UPDATE_NOTICE}
+
+
 @app.get("/api/check-update")
 async def api_check_update(source: str = "github"):
     global _current_version, _latest_info, _download_path
@@ -374,12 +406,14 @@ async def api_check_update(source: str = "github"):
 @app.post("/api/do-update")
 async def api_do_update():
     global _latest_info, _download_path, _download_progress
+    _download_progress = 0
     if not _latest_info or not _latest_info["download_url"]:
         return {"ok": False, "error": "No update info available"}
     try:
         async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
             async with client.stream("GET", _latest_info["download_url"]) as resp:
                 if resp.status_code != 200:
+                    _download_progress = 0
                     return {"ok": False, "error": f"Download failed: HTTP {resp.status_code}"}
                 total = int(resp.headers.get("content-length", 0))
                 downloaded = 0
@@ -406,9 +440,19 @@ async def api_apply_update():
     global _download_path
     if not _download_path or not _download_path.exists():
         return {"ok": False, "error": "No download available"}
+    # 开发模式保护：python 解释器运行时拒绝自更新
+    if "python" in os.path.basename(sys.executable).lower():
+        return {"ok": False, "error": "开发模式不支持自更新，请使用打包后的 exe"}
     try:
-        dist_root = Path(__file__).parent.parent / "dist"
-        dist_new = Path(__file__).parent.parent / "dist_new"
+        if getattr(sys, "frozen", False):
+            # 打包后：exe 所在目录即安装目录，就地替换
+            base_dir = Path(os.path.dirname(sys.executable))
+            target_dir = base_dir
+            dist_new = base_dir / "dist_new"
+        else:
+            base_dir = Path(__file__).parent.parent
+            target_dir = base_dir / "dist" / "ocppv16_server"
+            dist_new = base_dir / "dist_new"
         if dist_new.exists():
             shutil.rmtree(dist_new, ignore_errors=True)
         with zipfile.ZipFile(_download_path, 'r') as zf:
@@ -419,7 +463,6 @@ async def api_apply_update():
             if item.is_dir() and 'ocppv16_server' in item.name:
                 extracted_dir = item
                 break
-        target_dir = dist_root / 'ocppv16_server'
         exe_name = "ocpp_server.exe"
         bat = dist_new / "update.bat"
         bat.write_text(f"""@echo off
@@ -429,11 +472,20 @@ timeout /t 2 /nobreak >nul
 taskkill /f /im {exe_name} >nul 2>&1
 timeout /t 1 /nobreak >nul
 xcopy /e /y "{extracted_dir}\\*" "{target_dir}\\" >nul
+start "" "{target_dir / exe_name}"
+timeout /t 1 /nobreak >nul
 rmdir /s /q "{dist_new}" >nul
 del "{_download_path}" >nul 2>&1
-start "" "{target_dir / exe_name}"
 del "%~f0" >nul 2>&1
 """)
+        # 写更新完成标记，重启后前端弹窗提示
+        new_version = (_latest_info or {}).get("tag", "") or VERSION
+        flag_path = os.path.join(os.path.dirname(sys.executable), "updated_flag.txt")
+        try:
+            with open(flag_path, "w", encoding="utf-8") as f:
+                f.write(new_version)
+        except Exception:
+            pass
         import subprocess
         subprocess.Popen(str(bat), shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0)
         return {"ok": True, "message": "Update started"}

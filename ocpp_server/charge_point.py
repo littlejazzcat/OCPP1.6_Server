@@ -327,6 +327,10 @@ class ChargePointHandler(BaseChargePoint):
         publish(OcppMessage(charge_box_id=self.id, direction="OUT", action="Raw Send", payload={"data": raw_data[:500]}))
         await self._connection.send(raw_data)
 
+    async def send_data_transfer(self, vendor_id: str, message_id: str = None, data: str = None) -> call_result.DataTransfer:
+        """下发 DataTransfer 消息"""
+        return await self.call(call.DataTransfer(vendor_id=vendor_id, message_id=message_id, data=data))
+
     async def on_disconnect(self):
         logger.info(f"[{self.id}] Disconnected")
         publish(OcppMessage(charge_box_id=self.id, direction="IN", action="断开连接", payload={}))
